@@ -2,7 +2,7 @@ import pyproj
 import xarray as xr
 import matplotlib.pyplot as plt
 import time
-from scipy.spatial import cKDTree
+
 
 def reproject_to_swiss_coords(cosmo):
     """
@@ -22,6 +22,7 @@ def reproject_to_swiss_coords(cosmo):
 
     return cosmo
 
+
 def get_nn(cosmo_img, combi_img):
     """
     Given a cosmo image, find nearest points in the observation image
@@ -33,7 +34,6 @@ def get_nn(cosmo_img, combi_img):
     real_points = combi_img.sel(chx=chx, chy=chy, method='nearest')
 
     return real_points
-
 
 
 if __name__ == '__main__':
