@@ -15,6 +15,7 @@ import torch.nn.functional as F
 import torch
 
 from dataset import Dataset
+from verification import *
 
 
 os.makedirs("images", exist_ok=True)
@@ -38,8 +39,8 @@ print(opt)
 img_shape = (127, 188)
 
 if torch.cuda.is_available():
-    cuda = True 
-    print("Using CUDA") 
+    cuda = True
+    print("Using CUDA")
 else:
     cuda = False
     print("NOT using CUDA")
@@ -155,7 +156,16 @@ def sample_image(training_data, n_row, batches_done):
     gen_imgs = generator(z, y_pred)
     gen_imgs = gen_imgs.unsqueeze(1)
     print(gen_imgs.data.size())
-    save_image(gen_imgs.data, "images/%d.png" % batches_done, nrow=n_row, normalize=True)
+
+    fig = plt.figure(figsize=(20, 7))
+    # plt.imshow(gen_imgs.data)
+    plt.imshow(torchvision.utils.make_grid(gen_imgs.data, nrow=n_row), cmap = 'viridis')
+    plt.colorbar(orientation='horizontal')
+    plt.savefig("images/%d.png" % batches_done)
+    crps = crps(gen_imgs.data[0], y_real)
+    lsd = log_spectral_distance(gen_imgs.data[0], y_real)
+    print("[CRPS: %f] [Log-spectral-distance: %f]" % (crps, lsd))
+    # save_image(gen_imgs.data, "images/%d.png" % batches_done, nrow=n_row, normalize=True)
 
 
 # ----------
@@ -226,7 +236,7 @@ for epoch in range(opt.n_epochs):
         print("Discriminator: Backward step OK")
 
         print(
-            "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
+            "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f] "
             % (epoch, opt.n_epochs, i, len(training_generator), d_loss.item(), g_loss.item())
         )
 

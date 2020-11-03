@@ -30,7 +30,7 @@ def load_predictions():
 
     # Transform to the other coordinate system
     src_proj = pyproj.Proj("EPSG:4326") # WSG84
-    dst_proj = pyproj.Proj("EPSG:21781") # CH1903 / LV03 
+    dst_proj = pyproj.Proj("EPSG:21781") # CH1903 / LV03
     src_x = cosmo.lon.values
     src_y = cosmo.lat.values
     dst_x, dst_y = pyproj.transform(src_proj, dst_proj, src_x, src_y, always_xy=True)
@@ -44,7 +44,7 @@ class Dataset(torch.utils.data.Dataset):
         self.observations = load_observations()
         self.cosmo = load_predictions()
         self.ids = []
-    
+
     def __len__(self):
         return 128 #len(self.ids)
 
@@ -53,9 +53,9 @@ class Dataset(torch.utils.data.Dataset):
         obs_point = self.observations.isel(time=target_time, dummy=0)
         target_time = obs_point['time'].values
         pred_points = self.cosmo.sel(reftime=target_time - np.timedelta64(1, 'h')).isel(leadtime=1, member=0)  # TODO: member!
-        
+
         # nearest neighbors lookup
-        chx, chy = pred_points['chx'], pred_points['chy']
+            chx, chy = pred_points['chx'], pred_points['chy']
         #chx.values, chy.values
         real_point = obs_point.sel(chx=chx, chy=chy, method='nearest')
         #real_point['chx'].values, real_point['chy'].values
@@ -74,7 +74,7 @@ class Dataset(torch.utils.data.Dataset):
 def plotit():
     import numpy as np
     import matplotlib.pyplot as plt
-    
+
     prec_pred, prec_real = d.get_x_y_at_time(0)
 
     fig = plt.figure(figsize=(6, 3.2))
