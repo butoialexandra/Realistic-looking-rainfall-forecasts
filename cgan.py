@@ -35,7 +35,11 @@ opt = parser.parse_args()
 print(opt)
 
 # img_shape = (opt.channels, opt.img_size, opt.img_size)
-img_shape = (127, 188)
+input_shape = (127, 188)
+output_shape = (295, 427)
+# TODO: make sure we didn't mix up x, y from dataset
+in_pixels = int(np.prod(input_shape))
+out_pixels = int(np.prod(output_shape))
 
 if torch.cuda.is_available():
     cuda = True 
@@ -51,8 +55,6 @@ class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
 
-        #self.label_emb = nn.Embedding(opt.n_classes, opt.n_classes)
-
         def block(in_feat, out_feat, normalize=True):
             layers = [nn.Linear(in_feat, out_feat)]
             # if normalize:
@@ -60,27 +62,29 @@ class Generator(nn.Module):
             layers.append(nn.LeakyReLU(0.2, inplace=True))
             return layers
 
-        n_pixels = int(np.prod(img_shape))
+        in_pixels = int(np.prod(input_shape))
+        out_pixels = int(np.prod(output_shape))
+
         self.model = nn.Sequential(
-            *block(opt.latent_dim + n_pixels, 128, normalize=False),
+            *block(opt.latent_dim + in_pixels, 128, normalize=False),
             *block(128, 256),
             *block(256, 512),
             *block(512, 1024),
-            nn.Linear(1024, n_pixels),
+            nn.Linear(1024, out_pixels),
             nn.Tanh()
         )
 
     def forward(self, noise, observation):
         # Concatenate label embedding and image to produce input
         # Keep only batch size and flatten everything else
-        observation = observation.view(observation.size(0), -1)
-        print("A",observation.size())
+        observation = observation.view(observation.size(0), in_pixels)#-1)
+        # print("A",observation.size())
         gen_input = torch.cat((observation, noise), -1)
-        print("B",gen_input.size())
+        # print("B",gen_input.size())
         img = self.model(gen_input)
-        print("C",img.size())
-        img = img.view(img.size(0), *img_shape)
-        print("D",img.size())
+        # print("C",img.size())
+        img = img.view(img.size(0), *output_shape)
+        # print("D",img.size())
         return img
 
 
@@ -88,11 +92,11 @@ class Discriminator(nn.Module):
     def __init__(self):
         super(Discriminator, self).__init__()
 
-        #self.label_embedding = nn.Embedding(opt.n_classes, opt.n_classes)
-        n_pixels = int(np.prod(img_shape))
+        in_pixels = int(np.prod(input_shape))
+        out_pixels = int(np.prod(output_shape))
 
         self.model = nn.Sequential(
-            nn.Linear(n_pixels + n_pixels, 512),
+            nn.Linear(out_pixels + in_pixels, 512),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(512, 512),
             nn.Dropout(0.4),
@@ -125,11 +129,16 @@ if cuda:
 
 training_params = {"batch_size": opt.batch_size, "shuffle": True, "num_workers": 0}
 training_data = Dataset(device=device)
+train_idx, test_idx = training_data.train_test_split_ids()
+training_data.select_indices(train_idx)
 training_generator = torch.utils.data.DataLoader(training_data, **training_params)
+
 
 validation_params = {"batch_size": opt.batch_size, "shuffle": False, "num_workers": 0}
 validation_data = Dataset(device=device)
+validation_data.select_indices(test_idx)
 validation_generator = torch.utils.data.DataLoader(validation_data, **validation_params)
+
 
 print("Generators OK")
 
@@ -146,7 +155,7 @@ def sample_image(training_data, n_row, batches_done):
     # Sample noise
     z = Variable(FloatTensor(np.random.normal(0, 1, (n_row, opt.latent_dim))))
     # Get labels ranging from 0 to n_classes for n rows
-    y_pred, y_real = training_data.get_x_y_at_time(0)
+    y_pred, y_real = training_data.get_x_y_by_id(training_data.selected_indices[0])  # TODO: fix first date from 201805
     y_pred = torch.tensor(y_pred, device=device).repeat(n_row, 1, 1)
     y_real = torch.tensor(y_real, device=device).repeat(n_row, 1, 1)
     print(y_real.size())
@@ -194,12 +203,8 @@ for epoch in range(opt.n_epochs):
         validity = discriminator(gen_imgs, pred_imgs)
         g_loss = adversarial_loss(validity, valid)
 
-        print("Generator: Forward step OK")
-
         g_loss.backward()
         optimizer_G.step()
-
-        print("Generator: Backward step OK")
 
         # ---------------------
         #  Train Discriminator
@@ -218,12 +223,8 @@ for epoch in range(opt.n_epochs):
         # Total discriminator loss
         d_loss = (d_real_loss + d_fake_loss) / 2
 
-        print("Discriminator: Forward step OK")
-
         d_loss.backward()
         optimizer_D.step()
-
-        print("Discriminator: Backward step OK")
 
         print(
             "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
