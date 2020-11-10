@@ -3,10 +3,14 @@ import torch
 
 import os
 import random
+import warnings
+import time
+
 from os.path import join
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
+from tqdm.auto import tqdm
 import numpy as np
 import xarray as xr
 import pyproj
@@ -92,26 +96,64 @@ class Dataset(torch.utils.data.Dataset):
 
     def get_x_y_by_id(self, id: str):
         # TODO: list all times
+        t = time.time()
         obs_point = self.get_obs_by_id(id)
         target_time = obs_point['time'].values
         target_time_py = datetime.utcfromtimestamp(target_time.tolist() / 1e9)
-        leadtime = np.timedelta64(target_time_py.hour, 'h')
-        reftime = target_time - leadtime
-        leadtime = int((leadtime / np.timedelta64(1, 'h'))) - 1
+        hours_from_midnight = np.timedelta64(target_time_py.hour, 'h')
+        # print(f"[Time] Get observation {t - time.time()}")
 
+        # if hours_from_midnight / np.timedelta64(1, 'h') > 0:
+        #     # base forecast on the model from nearest midnight
+        #     reftime = target_time - hours_from_midnight
+        #     # select forecast for {leadtime} hours later
+        #     leadtime = int((hours_from_midnight / np.timedelta64(1, 'h')))
+        # else:
+        #     # base forecast on the model from 24h
+        #     reftime = target_time - np.timedelta64(24, 'h')
+        #     leadtime = 24
+
+        t = time.time()
+        # Get latest valid prediction
+        reftime = self.cosmo['reftime'].where(
+            self.cosmo['reftime'] < target_time, 
+            drop=True
+        )[-1].values
+        leadtime = int((target_time - reftime) / np.timedelta64(1, 'h'))
+        # print(f"[Time] Get nearest reftime {t - time.time()}")
+
+        if leadtime <= 0:
+            raise Exception(f"Invalid leadtime {leadtime} for target_time {target_time} and reftime {reftime}")
+
+        t = time.time()
         pred_points = self.cosmo.sel(reftime=reftime).isel(leadtime=leadtime, member=0)  # TODO: member!
+        # print(f"[Time] Select ensemble points {time.time() - t}")
+        # print(f"[INFO] Reftime {reftime} Leadtime {leadtime}")
 
+        t = time.time()
         # Crop real image to the boundaries of predicted image
         real_point = obs_point.where(
             (obs_point['chx'] >= self.top_left[0]) & (obs_point['chx'] <= self.bottom_right[0])
           & (obs_point['chy'] >= self.top_left[1]) & (obs_point['chy'] <= self.bottom_right[1]) 
         , drop=True)  
+        # print(f"[Time] Crop boundaries {time.time() - t}")
+
         # The cropped reference should be [640 x 710] -> [295 x 427] vs. input [127 x 188]
         # In other words, the input is 23,876 points, and the reference is 125,965 points
 
+        t = time.time()
         prec_pred = pred_points['PREC'].values
         prec_real = real_point['RR'].values
-        print("Input:", prec_pred.shape, "Reference:", prec_real.shape)
+        # print(f"[Time] Get values {time.time() - t}")
+
+        t = time.time()
+        if np.any(np.isnan(prec_pred)):
+            # raise Exception
+            warnings.warn(f"nan value encountered in ensemble for reftime {reftime} leadtime {leadtime}")
+
+        # print(f"[Time] Check nan {time.time() - t}")
+
+        # print("Input:", prec_pred.shape, "Reference:", prec_real.shape)
         return prec_pred, prec_real  # X: predictions, Y: observations
 
     def get_image_ids(self):
@@ -123,21 +165,38 @@ class Dataset(torch.utils.data.Dataset):
         return image_ids
     
     def train_test_split_ids(self, how='random', test_size=0.1):
+        ids = self.get_image_ids()
         if how == 'random':
-            ids = self.get_image_ids()
             train_ids, test_ids = train_test_split(ids, test_size=test_size)
             return train_ids, test_ids
+        elif how == 'seq':
+            split_idx = int(len(ids) * (1 - test_size))
+            train_ids = ids[:split_idx]
+            test_ids = ids[split_idx:]
+            return train_ids, test_ids
+            # TODO: another 'how': split by month or something
         else:
             raise Exception("Not implemented")
 
     def select_indices(self, indices, shuffle=True):
         self.selected_indices = indices.copy()
-        random.shuffle(self.selected_indices)
+        if shuffle:
+            random.shuffle(self.selected_indices)
+        return self
+
+    def select_all(self):
+        self.select_indices(self.get_image_ids(), shuffle=False)
+        return self
 
     def __getitem__(self, index):
+        t = time.time()
         x, y = self.get_x_y_by_id(self.selected_indices[index])
+        # print(f"[Time] Get X, Y total {(time.time() - t):.4f} s")
+
+        t = time.time()
         x = torch.tensor(x, device=self.device)
         y = torch.tensor(y, device=self.device)
+        # print(f"[Time] Copy into tensors {(time.time() - t):.4f} s")
         return x, y
 
 
@@ -168,7 +227,39 @@ def plotit():
     plt.savefig("foo.png")
 
 
+def save_buffer_to_file(buffer, filename):
+    buffer = torch.cat(buffer, dim=0)
+    torch.save(buffer, filename)
+
+
+def create_training_dataset(out_dir="/mnt/ds3lab-scratch/mzilinec/preprocessed/"):
+    ds = Dataset(device='cpu')
+    ds.select_all()
+    assert len(ds) > 0
+    buffer_x, buffer_y = [], []
+    file_offset = 0
+    
+    for i, (x, y) in tqdm(enumerate(ds), total=len(ds)):
+
+        if torch.any(x.isnan()) or torch.any(y.isnan()):
+            continue
+
+        buffer_x.append(x)
+        buffer_y.append(y)
+
+        if len(buffer_x) > 1024:
+            save_buffer_to_file(buffer_x, join(out_dir, f"x.{file_offset}.pt"))
+            save_buffer_to_file(buffer_y, join(out_dir, f"y.{file_offset}.pt"))
+            file_offset += 1
+            buffer_x, buffer_y = [], []
+    
+    if len(buffer_x) > 0:
+        save_buffer_to_file(buffer_x, join(out_dir, f"x.{file_offset}.pt"))
+        save_buffer_to_file(buffer_y, join(out_dir, f"y.{file_offset}.pt"))
+
+
 if __name__ == "__main__":
-    d = Dataset()
-    prec_pred, prec_real = d.get_x_y_at_time(0)
-    plotit()
+    create_training_dataset()
+    # d = Dataset()
+    # prec_pred, prec_real = d.get_x_y_at_time(0)
+    # plotit()

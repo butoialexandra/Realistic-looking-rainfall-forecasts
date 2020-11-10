@@ -2,6 +2,7 @@ import argparse
 import os
 import numpy as np
 import math
+import warnings
 
 import torchvision.transforms as transforms
 from torchvision.utils import save_image
@@ -30,7 +31,7 @@ parser.add_argument("--latent_dim", type=int, default=100, help="dimensionality 
 parser.add_argument("--n_classes", type=int, default=10, help="number of classes for dataset")
 parser.add_argument("--img_size", type=int, default=32, help="size of each image dimension")
 parser.add_argument("--channels", type=int, default=1, help="number of image channels")
-parser.add_argument("--sample_interval", type=int, default=1, help="interval between image sampling")
+parser.add_argument("--sample_interval", type=int, default=500, help="interval between image sampling")
 opt = parser.parse_args()
 print(opt)
 
@@ -129,14 +130,14 @@ if cuda:
 
 training_params = {"batch_size": opt.batch_size, "shuffle": True, "num_workers": 0}
 training_data = Dataset(device=device)
-train_idx, test_idx = training_data.train_test_split_ids()
-training_data.select_indices(train_idx)
+train_idx, test_idx = training_data.train_test_split_ids(how='seq')
+training_data.select_indices(train_idx, shuffle=False)  # TODO: this might cause problems!
 training_generator = torch.utils.data.DataLoader(training_data, **training_params)
 
 
 validation_params = {"batch_size": opt.batch_size, "shuffle": False, "num_workers": 0}
 validation_data = Dataset(device=device)
-validation_data.select_indices(test_idx)
+validation_data.select_indices(test_idx, shuffle=False)  # here order doesn't matter
 validation_generator = torch.utils.data.DataLoader(validation_data, **validation_params)
 
 
@@ -151,19 +152,20 @@ LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
 
 
 def sample_image(training_data, n_row, batches_done):
-    """Saves a grid of generated digits ranging from 0 to n_classes"""
+    """Saves a grid of generated images"""
+    n_row = 1 # FIXME
     # Sample noise
     z = Variable(FloatTensor(np.random.normal(0, 1, (n_row, opt.latent_dim))))
     # Get labels ranging from 0 to n_classes for n rows
     y_pred, y_real = training_data.get_x_y_by_id(training_data.selected_indices[0])  # TODO: fix first date from 201805
     y_pred = torch.tensor(y_pred, device=device).repeat(n_row, 1, 1)
     y_real = torch.tensor(y_real, device=device).repeat(n_row, 1, 1)
-    print(y_real.size())
-    print(z.size())
+    # print(y_real.size())
+    # print(z.size())
     # labels = Variable(LongTensor(labels))
     gen_imgs = generator(z, y_pred)
     gen_imgs = gen_imgs.unsqueeze(1)
-    print(gen_imgs.data.size())
+    # print(gen_imgs.data.size())
     save_image(gen_imgs.data, "images/%d.png" % batches_done, nrow=n_row, normalize=True)
 
 
@@ -177,6 +179,9 @@ for epoch in range(opt.n_epochs):
     for i, (pred_imgs, real_imgs) in enumerate(training_generator):
 
         batch_size = pred_imgs.shape[0]
+        if torch.any(pred_imgs.isnan()):
+            warnings.warn("Skipping batch with nan value")
+            continue
 
         # Adversarial ground truths
         valid = Variable(FloatTensor(batch_size, 1).fill_(1.0), requires_grad=False)
@@ -234,3 +239,4 @@ for epoch in range(opt.n_epochs):
         batches_done = epoch * len(training_generator) + i
         if batches_done % opt.sample_interval == 0:
             sample_image(training_data, n_row=10, batches_done=batches_done)
+    # sample_image(training_data, n_row=10, batches_done=epoch)
