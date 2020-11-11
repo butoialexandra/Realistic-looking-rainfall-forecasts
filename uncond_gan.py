@@ -13,11 +13,13 @@ from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
+import matplotlib.pyplot as plt
 
 from dataset import Dataset
 
 
-os.makedirs("images", exist_ok=True)
+#os.makedirs("images", exist_ok=True)
+os.makedirs("images_nozeros", exist_ok=True)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--n_epochs", type=int, default=200, help="number of epochs of training")
@@ -62,7 +64,7 @@ class Generator(nn.Module):
 
         n_pixels = int(np.prod(img_shape))
         self.model = nn.Sequential(
-            *block(opt.latent_dim + n_pixels, 128, normalize=False),
+            *block(opt.latent_dim, 128, normalize=False),
             *block(128, 256),
             *block(256, 512),
             *block(512, 1024),
@@ -142,21 +144,20 @@ FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
 
 
-def sample_image(training_data, n_row, batches_done):
+def sample_image(n_row, batches_done):
     """Saves a grid of generated digits ranging from 0 to n_classes"""
     # Sample noise
     z = Variable(FloatTensor(np.random.normal(0, 1, (n_row, opt.latent_dim))))
-    # Get labels ranging from 0 to n_classes for n rows
-    y_pred, y_real = training_data.get_x_y_at_time(0)
-    y_pred = torch.tensor(y_pred, device=device).repeat(n_row, 1, 1)
-    y_real = torch.tensor(y_real, device=device).repeat(n_row, 1, 1)
-    print(y_real.size())
     print(z.size())
-    # labels = Variable(LongTensor(labels))
     gen_imgs = generator(z)
     gen_imgs = gen_imgs.unsqueeze(1)
     print(gen_imgs.data.size())
-    save_image(gen_imgs.data, "images/%d.png" % batches_done, nrow=n_row, normalize=True)
+    plt.figure(figsize = (n_row*10, 10))
+    for i in range(n_row):
+        plt.subplot(n_row, 1, i)
+        plt.pcolormesh(gen_imgs.detach().cpu().numpy()[i][0])
+    plt.savefig("images_nozeros/%d.png" % batches_done)
+    #save_image(gen_imgs.data, "images_nozeros/%d.png" % batches_done, nrow=n_row, normalize=True)
 
 
 # ----------
@@ -167,7 +168,6 @@ for epoch in range(opt.n_epochs):
     print("Starting epoch %d" % epoch)
 
     for i, (pred_imgs, real_imgs) in enumerate(training_generator):
-
         batch_size = pred_imgs.shape[0]
 
         # Adversarial ground truths
@@ -233,4 +233,4 @@ for epoch in range(opt.n_epochs):
 
         batches_done = epoch * len(training_generator) + i
         if batches_done % opt.sample_interval == 0:
-            sample_image(training_data, n_row=10, batches_done=batches_done)
+            sample_image(n_row=10, batches_done=batches_done)
