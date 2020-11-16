@@ -3,6 +3,9 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import time
 
+import torch
+import torch.nn as nn
+
 
 def reproject_to_swiss_coords(cosmo):
     """
@@ -53,3 +56,17 @@ if __name__ == '__main__':
     forecast.PREC.isel(member=0).plot.pcolormesh("chx", "chy", ax=axes[0], cmap='viridis', vmin=0)
     real_points.RR.plot.pcolormesh("chx", "chy", ax=axes[1])
     plt.show()
+
+
+class View(nn.Module):
+    def __init__(self, shape):
+        super(View, self).__init__()
+        self.shape = shape
+
+    def forward(self, x):
+        return x.view(x.size(0), *self.shape)
+
+
+class Flatten(nn.Module):
+    def forward(self, x):
+        return x.view(x.size(0), -1)
