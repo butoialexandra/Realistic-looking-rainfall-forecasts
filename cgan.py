@@ -26,7 +26,7 @@ from generator import Generator, GeneratorA
 parser = argparse.ArgumentParser()
 parser.add_argument("--n_epochs", type=int, default=200, help="number of epochs of training")
 parser.add_argument("--batch_size", type=int, default=8, help="size of the batches")
-parser.add_argument("--lr_gen", type=float, default=0.0005, help="adam: learning rate")
+parser.add_argument("--lr_gen", type=float, default=0.01, help="adam: learning rate")
 parser.add_argument("--lr_disc", type=float, default=0.0001, help="adam: learning rate")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
@@ -97,7 +97,7 @@ generator = GeneratorA()
 discriminator = Discriminator()
 datetimestr = datetime.now().strftime("%d-%b-%Y-%H:%M")
 image_dir = f"images_{type(generator).__name__}_{datetimestr}" 
-os.makedirs(images_dir, exist_ok=True)
+os.makedirs(image_dir, exist_ok=True)
 if cuda:
     generator.cuda()
     discriminator.cuda()
@@ -142,7 +142,7 @@ def sample_image_(training_data, n_row, batches_done):
     gen_imgs = gen_imgs.unsqueeze(1)
     # print(gen_imgs.data.size())
     # data = torch.cat((gen_imgs.data.squeeze(0), y_real), dim=0)
-    save_image(gen_imgs.data, f"{images_dir}/{batches_done}.png", nrow=2, normalize=True)
+    save_image(gen_imgs.data, f"{image_dir}/{batches_done}.png", nrow=2, normalize=True)
 
 
 def sample_image(training_data, n_row, batches_done):
@@ -164,7 +164,7 @@ def sample_image(training_data, n_row, batches_done):
     ax.set_title('Observation')
     plt.imshow(y_real.squeeze().detach().cpu())
     plt.colorbar(orientation='horizontal')
-    plt.savefig("images/%d.png" % batches_done)
+    plt.savefig(f"{image_dir}/{batches_done}.png")
 
 
 # ----------
