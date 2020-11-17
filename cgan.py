@@ -95,8 +95,8 @@ adversarial_loss = torch.nn.MSELoss()
 # Initialize generator and discriminator
 generator = GeneratorA()
 discriminator = Discriminator()
-
-os.makedirs(f"images_{type(generator).__name__}_{datetime.now().strftime("%d-%b-%Y-%H:%M")}", exist_ok=True)
+datetimestr = datetime.now().strftime("%d-%b-%Y-%H:%M")
+os.makedirs(f"images_{type(generator).__name__}_{datetimestr}", exist_ok=True)
 if cuda:
     generator.cuda()
     discriminator.cuda()
