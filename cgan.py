@@ -16,17 +16,18 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import matplotlib.pyplot as plt
+from datetime import datetime
 
 from dataset import Dataset
 from generator import Generator, GeneratorA
 
 
-os.makedirs("images", exist_ok=True)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--n_epochs", type=int, default=200, help="number of epochs of training")
 parser.add_argument("--batch_size", type=int, default=8, help="size of the batches")
-parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
+parser.add_argument("--lr_gen", type=float, default=0.0005, help="adam: learning rate")
+parser.add_argument("--lr_disc", type=float, default=0.0001, help="adam: learning rate")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")
@@ -60,12 +61,12 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
 
         in_pixels = int(np.prod(input_shape))
-        out_pixels = int(np.prod(output_shape))
+        #out_pixels = int(np.prod(output_shape))
 
         self.model = nn.Sequential(
             # nn.Conv2d(in_channels=2, out_channels=1, kernel_size=5, stride=1),
             # nn.Linear(out_pixels + in_pixels, 512),
-            nn.Linear(out_pixels, 512),
+            nn.Linear(in_pixels, 512),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(512, 512),
             nn.Dropout(0.4),
@@ -95,6 +96,7 @@ adversarial_loss = torch.nn.MSELoss()
 generator = GeneratorA()
 discriminator = Discriminator()
 
+os.makedirs(f"images_{type(generator).__name__}_{datetime.now().strftime("%d-%b-%Y-%H:%M")}", exist_ok=True)
 if cuda:
     generator.cuda()
     discriminator.cuda()
@@ -116,8 +118,8 @@ validation_generator = torch.utils.data.DataLoader(validation_data, **validation
 print("Generators OK")
 
 # Optimizers
-optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
-optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr_gen, betas=(opt.b1, opt.b2))
+optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr_disc, betas=(opt.b1, opt.b2))
 
 FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor

@@ -56,7 +56,7 @@ class GeneratorA(nn.Module):
         self.encoder = nn.Sequential(*self._build_encoder())
         self.decoder = nn.Sequential(*self._build_decoder())
         self.alt_decoder = nn.Sequential(*self._build_alt_decoder())
-        self.upsample = nn.ConvTranspose2d(in_channels=1, out_channels=1, kernel_size=3, stride=3)
+        self.upsample = nn.ConvTranspose2d(in_channels=1, out_channels=1, kernel_size=3, stride=3, output_padding=(1,2))
         # self.input_dims = (127,188)
 
     def _build_encoder(self):
@@ -68,7 +68,7 @@ class GeneratorA(nn.Module):
             # (batch_size, 1, floor((h-2)/3), floor((w-2)/3)) -> 41x62
             util.Flatten(),
             # (batch_size, 41*62) -> 2542
-            nn.Linear(in_features=41*62, out_features=1024),
+            nn.Linear(in_features=41*62, out_features=2604),
             nn.Sigmoid(),
         ]
         return layers
@@ -100,8 +100,8 @@ class GeneratorA(nn.Module):
         # assert embedding.shape[1] == 1024, embedding.shape
         # output = self.decoder(embedding).squeeze(1)
         # output = output[:,:295,:]  # we just have to get rid of 6 extra elements here
-        import pdb; pdb.set_trace
-        output = self.upsample(embedding, output_size=input.size())
+        embed_in = embedding.view(embedding.size(0),1,input.size(1)//3, input.size(2)//3)
+        output = self.upsample(embed_in, output_size=input.size()[1:])
 
         # output = self.alt_decoder(input.unsqueeze(1)).squeeze(1)
         # output = output[:,:295, :427]

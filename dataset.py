@@ -19,7 +19,7 @@ from sklearn.model_selection import train_test_split
 
 
 base_dir = "/mnt/ds3lab-scratch/bhendj/data"
-on_cluster = False
+on_cluster = True
 def load_observations(verbose=True):
     """
     Observations: data for every hour
@@ -87,7 +87,8 @@ class Dataset(torch.utils.data.Dataset):
     def compute_nearest_neighbors(self):
 
         chx, chy = self.cosmo['chx'], self.cosmo['chy']
-        self.observations = self.observations.sel(chx=chx, chy=chy, method='nearest')
+        for key, obs in self.observations.items():
+            self.observations[key] =  obs.sel(chx=chx, chy=chy, method='nearest')
         # real_point = self.observations['201805']#.isel(reftime=0, leadtime=0, member=0)
         # pred_point = self.cosmo
         # chx, chy = pred_point['chx'].min(), pred_point['chy'].min()
