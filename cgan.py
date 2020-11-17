@@ -96,7 +96,8 @@ adversarial_loss = torch.nn.MSELoss()
 generator = GeneratorA()
 discriminator = Discriminator()
 datetimestr = datetime.now().strftime("%d-%b-%Y-%H:%M")
-os.makedirs(f"images_{type(generator).__name__}_{datetimestr}", exist_ok=True)
+image_dir = f"images_{type(generator).__name__}_{datetimestr}" 
+os.makedirs(images_dir, exist_ok=True)
 if cuda:
     generator.cuda()
     discriminator.cuda()
@@ -141,7 +142,7 @@ def sample_image_(training_data, n_row, batches_done):
     gen_imgs = gen_imgs.unsqueeze(1)
     # print(gen_imgs.data.size())
     # data = torch.cat((gen_imgs.data.squeeze(0), y_real), dim=0)
-    save_image(gen_imgs.data, "images/%d.png" % batches_done, nrow=2, normalize=True)
+    save_image(gen_imgs.data, f"{images_dir}/{batches_done}.png", nrow=2, normalize=True)
 
 
 def sample_image(training_data, n_row, batches_done):
