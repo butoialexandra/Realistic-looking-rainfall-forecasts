@@ -10,6 +10,7 @@ import util
 class FeedforwardGenerator(nn.Module):
     def __init__(self, input_shape, latent_dim):
         super().__init__()
+        self.input_shape = input_shape
 
         def block(in_feat, out_feat, normalize=True):
             layers = [nn.Linear(in_feat, out_feat)]
@@ -22,7 +23,7 @@ class FeedforwardGenerator(nn.Module):
 
         self.model = nn.Sequential(
             *block(self.in_pixels + latent_dim, 1024, normalize=False),
-            *block(1024, 1024),
+            *block(1024, self.in_pixels),
             nn.Sigmoid()
         )
 
@@ -32,7 +33,7 @@ class FeedforwardGenerator(nn.Module):
         observation = observation.view(observation.size(0), -1)
         gen_input = torch.cat((observation, noise), -1)
         img = self.model(gen_input)
-        img = img.view(img.size(0), *output_shape)
+        img = img.view(img.size(0), 1, *self.input_shape)
         return img
 
 
@@ -66,5 +67,4 @@ class ConvGenerator(nn.Module):
         embedding = self.encoder(input.unsqueeze(1))
         embed_in = embedding.view(embedding.size(0),1,input.size(1)//3, input.size(2)//3)
         output = self.upsample(embed_in, output_size=input.size()[1:])
-
         return output.contiguous()

@@ -35,6 +35,7 @@ parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads 
 parser.add_argument("--latent_dim", type=int, default=1000, help="dimensionality of the latent space")
 parser.add_argument("--channels", type=int, default=1, help="number of image channels")
 parser.add_argument("--sample_interval", type=int, default=10, help="interval between image sampling")
+parser.add_argument("--generator", type=str, default='conv', choices=['conv','feedforward'], help="Convolutional or feedforward generator, options: conv, feedforward")
 opt = parser.parse_args()
 print(opt)
 
@@ -60,7 +61,10 @@ device = torch.device("cuda:0" if cuda else "cpu")
 adversarial_loss = torch.nn.MSELoss()
 
 # Initialize generator and discriminator
-generator = ConvGenerator(input_shape, opt.latent_dim)
+if opt.generator == 'conv':
+    generator = ConvGenerator(input_shape, opt.latent_dim)
+else:
+    generator = FeedforwardGenerator(input_shape, opt.latent_dim)
 discriminator = Discriminator(input_shape)
 datetimestr = datetime.now().strftime("%d-%b-%Y-%H:%M")
 image_dir = f"images_{type(generator).__name__}_{datetimestr}"
@@ -145,7 +149,7 @@ for epoch in range(opt.n_epochs):
     print("Starting epoch %d" % epoch)
 
     for i, (pred_imgs, real_imgs) in enumerate(training_generator):
-
+        generator.train()
         batch_size = pred_imgs.shape[0]
         if torch.any(pred_imgs.isnan()):
             warnings.warn("Skipping batch with nan value")
@@ -168,8 +172,8 @@ for epoch in range(opt.n_epochs):
         # Sample noise and labels as generator input
         z = Variable(FloatTensor(np.random.normal(0, 1, (batch_size, opt.latent_dim))))
         # gen_labels = Variable(LongTensor(np.random.randint(0, opt.n_classes, batch_size)))
-
         # Generate a batch of images
+        generator.eval()
         gen_imgs = generator(z, pred_imgs)
 
         # Loss measures generator's ability to fool the discriminator
