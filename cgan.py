@@ -6,6 +6,7 @@ import warnings
 
 import torchvision.transforms as transforms
 from torchvision.utils import save_image
+#from torch.utils.tensorboard import SummaryWriter
 
 from torch.utils.data import DataLoader
 from torchvision import datasets
@@ -19,8 +20,8 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 
 from dataset import Dataset
-from generator import Generator, GeneratorA
-
+from generator import FeedforwardGenerator, ConvGenerator
+from discriminator import Discriminator
 
 
 parser = argparse.ArgumentParser()
@@ -32,8 +33,6 @@ parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first 
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")
 parser.add_argument("--latent_dim", type=int, default=1000, help="dimensionality of the latent space")
-parser.add_argument("--n_classes", type=int, default=10, help="number of classes for dataset")
-parser.add_argument("--img_size", type=int, default=32, help="size of each image dimension")
 parser.add_argument("--channels", type=int, default=1, help="number of image channels")
 parser.add_argument("--sample_interval", type=int, default=10, help="interval between image sampling")
 opt = parser.parse_args()
@@ -41,10 +40,8 @@ print(opt)
 
 # img_shape = (opt.channels, opt.img_size, opt.img_size)
 input_shape = (127, 188)
-output_shape = (295, 427)
 # TODO: make sure we didn't mix up x, y from dataset
 in_pixels = int(np.prod(input_shape))
-out_pixels = int(np.prod(output_shape))
 
 if torch.cuda.is_available():
     cuda = True
@@ -56,52 +53,25 @@ else:
 device = torch.device("cuda:0" if cuda else "cpu")
 
 
-class Discriminator(nn.Module):
-    def __init__(self):
-        super(Discriminator, self).__init__()
 
-        in_pixels = int(np.prod(input_shape))
-        #out_pixels = int(np.prod(output_shape))
-
-        self.model = nn.Sequential(
-            # nn.Conv2d(in_channels=2, out_channels=1, kernel_size=5, stride=1),
-            # nn.Linear(out_pixels + in_pixels, 512),
-            nn.Linear(in_pixels, 512),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, 512),
-            nn.Dropout(0.4),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, 512),
-            nn.Dropout(0.4),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, 1),
-        )
-
-    def forward(self, img, observation):
-        # Concatenate label embedding and image to produce input
-        # observation = observation.view(observation.size(0), -1)
-        # print(observation.shape, img.shape)
-        # d_in = torch.cat((img.view(img.size(0), -1), observation), -1)
-        # d_in = torch.stack((observation, img), dim=1)
-        d_in = img.view(img.size(0), -1)
-        validity = self.model(d_in)
-        validity = torch.sigmoid(validity)
-        return validity
 
 
 # Loss functions
 adversarial_loss = torch.nn.MSELoss()
 
 # Initialize generator and discriminator
-generator = GeneratorA()
-discriminator = Discriminator()
+generator = ConvGenerator(input_shape, opt.latent_dim)
+discriminator = Discriminator(input_shape)
 datetimestr = datetime.now().strftime("%d-%b-%Y-%H:%M")
-image_dir = f"images_{type(generator).__name__}_{datetimestr}" 
+image_dir = f"images_{type(generator).__name__}_{datetimestr}"
 os.makedirs(image_dir, exist_ok=True)
 if cuda:
     generator.cuda()
     discriminator.cuda()
     adversarial_loss.cuda()
+
+#initialize Tensorboard
+#writer = SummaryWriter(f"runs/{datetime.now()}")
 
 training_params = {"batch_size": opt.batch_size, "shuffle": True, "num_workers": 0}
 training_data = Dataset(device=device)
@@ -239,6 +209,7 @@ for epoch in range(opt.n_epochs):
         )
 
         batches_done = epoch * len(training_generator) + i
+        # writer.add_scalar(g_loss)
         if batches_done % opt.sample_interval == 0:
             sample_image(training_data, n_row=10, batches_done=batches_done)
     # sample_image(training_data, n_row=10, batches_done=epoch)
