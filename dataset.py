@@ -18,14 +18,14 @@ import pyproj
 from sklearn.model_selection import train_test_split
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, device='cpu'):
+    def __init__(self, device='cpu', on_cluster=False):
         self.device = device
-        self.on_cluster = False
+        self.on_cluster = on_cluster
         self.selected_indices = []
+        self.base_dir = "/mnt/ds3lab-scratch/bhendj/data"
         self.observations = self.load_observations()
         self.cosmo = self.load_predictions()
         self.compute_nearest_neighbors()
-        self.base_dir = "/mnt/ds3lab-scratch/bhendj/data"
 
 
     def load_observations(self, verbose=True):
@@ -58,7 +58,7 @@ class Dataset(torch.utils.data.Dataset):
             x y: 188 x 127
         """
         if self.on_cluster:
-            path = join(base_dir, "cosmoe", "data.zarr", "data_ethz.zarr")
+            path = join(self.base_dir, "cosmoe", "data.zarr", "data_ethz.zarr")
         else:
             path = "./cosmoe_prec_201805.zarr"
 
