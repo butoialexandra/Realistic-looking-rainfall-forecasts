@@ -4,14 +4,13 @@ import datetime
 import matplotlib.pyplot as plt
 
 import torch
-import torchvision
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch.autograd import Variable
 
-from discriminator import Discriminator
-from generator import Generator
-from dataset import WGANDataset
+from unconditional.discriminator import Discriminator
+from unconditional.generator import Generator
+from unconditional.dataset import WGANDataset
 
 def sample_image(generator, cuda, n_row, latent_dim, img_shape):
     FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
