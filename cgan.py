@@ -359,6 +359,8 @@ for epoch in range(opt.n_epochs):
     for i, (pred_imgs, real_imgs) in enumerate(training_generator):
 
         batch_size = pred_imgs.shape[0]
+        pred_imgs = pred_imgs.unsqueeze(1)
+        real_imgs = real_imgs.unsqueeze(1)
         if torch.any(pred_imgs.isnan()):
             warnings.warn("Skipping batch with nan value")
             continue
