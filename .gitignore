@@ -5,6 +5,7 @@ cosmoe_prec_201805.zarr.tar
 combiprecip_201805.nc
 .DS_Store
 runs/*
+images/*
 
 
 ########################################
