@@ -4,6 +4,7 @@ import torch
 import os
 import random
 import warnings
+import glob
 import time
 
 from os.path import join
@@ -15,63 +16,116 @@ import numpy as np
 import xarray as xr
 import pyproj
 
+
 from sklearn.model_selection import train_test_split
+
+def load_observations(base_dir, on_cluster=False, verbose=True):
+    """
+    Observations: data for every hour
+        since 2016-05
+        until 2020-09
+        x y: 710 x 640
+    """
+    files = {}
+    if on_cluster:
+        dt = datetime(year=2016, month=5, day=1)
+        while dt < datetime(year=2020, month=10, day=1):
+            path = join(base_dir, "combiprecip", f"combiprecip_{dt.year}{dt.month:02d}.nc")
+            if verbose:
+                print(path)
+            obj = xr.open_mfdataset(path, combine='by_coords')
+            files[f"{dt.year}{dt.month:02d}"] = obj
+            dt = dt + relativedelta(months=1)
+    else:
+        path = "./combiprecip_201805.nc"
+        weather = xr.open_mfdataset(path, combine='by_coords')
+        files['201805'] = weather
+    return files
+
+def load_predictions(base_dir, on_cluster=False):
+    """
+    Predictions: based on 00:00 and 12:00 (reftime)
+        data for every hour in next 5 days (leadtime is timedelta)
+        x y: 188 x 127
+    """
+    if on_cluster:
+        path = join(base_dir, "cosmoe", "data.zarr", "data_ethz.zarr")
+    else:
+        path = "./cosmoe_prec_201805.zarr"
+
+    cosmo = xr.open_zarr(path)
+
+    # Transform to the other coordinate system
+    src_proj = pyproj.Proj("EPSG:4326") # WSG84
+    dst_proj = pyproj.Proj("EPSG:21781") # CH1903 / LV03
+    src_x = cosmo.lon.values
+    src_y = cosmo.lat.values
+    dst_x, dst_y = pyproj.transform(src_proj, dst_proj, src_x, src_y, always_xy=True)
+    cosmo = cosmo.assign_coords({"chx": (("y", "x"), dst_x) , "chy": (("y", "x"), dst_y)})
+    return cosmo
+
+def load_predictions_from_cache(load_dir, verbose=True):
+    predictions = []
+    for filename in glob.glob(f"{load_dir}/predictions*.pt"):
+        predictions.append(torch.load(filename).numpy())
+        print(f"Loaded {filename}")
+    predictions = np.concatenate(predictions,axis=0) 
+    return predictions
+
+class UnconditionalDataset(torch.utils.data.Dataset):
+    def __init__(self, device='cpu', on_cluster=False):
+        self.device = device
+        self.base_dir = "/mnt/ds3lab-scratch/bhendj/data"
+        load_dir = "/mnt/ds3lab-scratch/dslab2019/shghosh/preprocessed"
+        if os.path.isdir(load_dir):
+            self.predicted_images = load_predictions_from_cache(load_dir)
+            #self.predicted_images = self.predicted_images[:, :, 30:158]
+            zero_mat1 = (np.random.rand(self.predicted_images.shape[0],1,self.predicted_images.shape[2]) + 0.5).astype(float)
+            self.predicted_images = np.concatenate((self.predicted_images, zero_mat1), axis=1)
+            zero_mat2 = (np.random.rand(self.predicted_images.shape[0],self.predicted_images.shape[1],4) + 0.5).astype(float)
+            self.predicted_images = np.concatenate((self.predicted_images, zero_mat2), axis=2)
+            median_val = np.median(self.predicted_images.sum(axis=(1,2))) + 100.0
+            self.predicted_images = self.predicted_images[self.predicted_images.sum(axis=(1,2))> median_val]
+        else:
+            self.cosmo = load_predictions(self.base_dir, on_cluster)
+            self.load_images_and_remove_nan()
+        self.standardize_images()
+
+    def load_images_and_remove_nan(self):
+        self.predicted_images = []
+        for leadtime in range(1, self.cosmo.leadtime.values.shape[0]):
+            self.predicted_images.append(self.cosmo.PREC.isel(leadtime=leadtime, member=0).values) #TODO: Member
+        self.predicted_images = np.array(self.predicted_images)
+        self.predicted_images = self.predicted_images[:, 32:96, 62:126]
+        #Removing NaN indices
+        nan_indices = np.unique(np.isnan(self.predicted_images).nonzero()[0])
+        self.predicted_images = np.delete(self.predicted_images, nan_indices, axis=0)
+
+    def standardize_images(self):
+        #Standardizing to 0.5 mean, 0.5 std
+        self.predicted_images -= np.mean(self.predicted_images, axis=0, keepdims=True)
+        self.predicted_images /= 2.0*np.std(self.predicted_images, axis = 0, keepdims=True)
+        self.predicted_images += 0.5
+        self.predicted_images = np.expand_dims(self.predicted_images, axis=1)
+    
+    def __len__(self):
+        return len(self.predicted_images)
+
+    def __getitem__(self, index):
+        img = self.predicted_images[index]
+        img = torch.tensor(img, device=self.device)
+        return img
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, device='cpu', on_cluster=False):
         self.device = device
-        self.on_cluster = on_cluster
         self.selected_indices = []
         self.base_dir = "/mnt/ds3lab-scratch/bhendj/data"
-        self.observations = self.load_observations()
-        self.cosmo = self.load_predictions()
+        self.observations = load_observations(self.base_dir, on_cluster)
+        self.cosmo = load_predictions(self.base_dir, on_cluster)
         self.compute_nearest_neighbors()
 
 
-    def load_observations(self, verbose=True):
-        """
-        Observations: data for every hour
-            since 2016-05
-            until 2020-09
-            x y: 710 x 640
-        """
-        files = {}
-        if self.on_cluster:
-            dt = datetime(year=2016, month=5, day=1)
-            while dt < datetime(year=2020, month=10, day=1):
-                path = join(self.base_dir, "combiprecip", f"combiprecip_{dt.year}{dt.month:02d}.nc")
-                if verbose:
-                    print(path)
-                obj = xr.open_mfdataset(path, combine='by_coords')
-                files[f"{dt.year}{dt.month:02d}"] = obj
-                dt = dt + relativedelta(months=1)
-        else:
-            path = "./combiprecip_201805.nc"
-            weather = xr.open_mfdataset(path, combine='by_coords')
-            files['201805'] = weather
-        return files
-
-    def load_predictions(self):
-        """
-        Predictions: based on 00:00 and 12:00 (reftime)
-            data for every hour in next 5 days (leadtime is timedelta)
-            x y: 188 x 127
-        """
-        if self.on_cluster:
-            path = join(self.base_dir, "cosmoe", "data.zarr", "data_ethz.zarr")
-        else:
-            path = "./cosmoe_prec_201805.zarr"
-
-        cosmo = xr.open_zarr(path)
-
-        # Transform to the other coordinate system
-        src_proj = pyproj.Proj("EPSG:4326") # WSG84
-        dst_proj = pyproj.Proj("EPSG:21781") # CH1903 / LV03
-        src_x = cosmo.lon.values
-        src_y = cosmo.lat.values
-        dst_x, dst_y = pyproj.transform(src_proj, dst_proj, src_x, src_y, always_xy=True)
-        cosmo = cosmo.assign_coords({"chx": (("y", "x"), dst_x) , "chy": (("y", "x"), dst_y)})
-        return cosmo
 
     def __len__(self):
         return len(self.selected_indices)
