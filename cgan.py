@@ -176,25 +176,26 @@ class Discriminator(nn.Module):
 
         self.sigmoid = sigmoid
 
-        # 286x286 discriminator
-        self.disc1 = EncoderBlock(in_channels * 2, 64, bias=bias, do_norm=False, do_activation=False)
-        self.disc2 = EncoderBlock(64, 128, bias=bias, norm=norm)
+        self.disc1 = EncoderBlock(in_channels, 64, bias=bias, do_norm=False, do_activation=False)
+        self.disc2 = EncoderBlock(in_channels, 64, stride=1, padding=2, bias=bias, do_norm=False, do_activation=False)
         self.disc3 = EncoderBlock(128, 256, bias=bias, norm=norm)
         self.disc4 = EncoderBlock(256, 512, bias=bias, norm=norm)
         self.disc5 = EncoderBlock(512, 512, bias=bias, norm=norm)
         self.disc6 = EncoderBlock(512, 512, bias=bias, stride=1, norm=norm)
         self.disc7 = EncoderBlock(512, out_channels, bias=bias, stride=1, do_norm=False)
-        self.pool = nn.AvgPool2d(6)
+        self.pool = nn.AvgPool2d(14)
 
     def forward(self, x, ref):
-        d1 = self.disc1(torch.cat([x, ref],1))
-        d2 = self.disc2(d1)
+        d1 = self.disc1(x)
+        d2 = self.disc2(ref)
+        d2 = torch.cat([d1, d2],1)
         d3 = self.disc3(d2)
         d4 = self.disc4(d3)
         d5 = self.disc5(d4)
         d6 = self.disc6(d5)
         d7 = self.disc7(d6)
         d8 = self.pool(d7)
+        d8 = d8.squeeze(3).squeeze(2)
         if self.sigmoid:
             final = nn.Sigmoid()(d8)
         else:
@@ -310,6 +311,8 @@ def sample_image(training_data, n_row, batches_done):
     y_pred, y_real = training_data.get_x_y_by_id(training_data.selected_indices[0])  # TODO: fix first date from 201805
     y_pred = torch.tensor(y_pred, device=device).repeat(n_row, 1, 1) / 10
     y_real = torch.tensor(y_real, device=device).repeat(n_row, 1, 1) / 10
+    y_pred = y_pred.unsqueeze(1)
+    y_real = y_real.unsqueeze(1)
     gen_imgs = generator(y_pred)
 
     fig = plt.figure(figsize=(6, 3.2))
@@ -362,7 +365,7 @@ for epoch in range(opt.n_epochs):
         gen_imgs = generator(pred_imgs)
 
         # Loss measures generator's ability to fool the discriminator
-        validity = discriminator(gen_imgs, real_imgs)
+        validity = discriminator(gen_imgs, pred_imgs)
         g_loss = adversarial_loss(validity, valid)
 
         g_loss.backward()
@@ -376,14 +379,14 @@ for epoch in range(opt.n_epochs):
 
         # Loss for real images
         validity_real = discriminator(real_imgs, pred_imgs)
-        print("Validity real:", validity_real)
+        # print("Validity real:", validity_real)
         d_real_loss = adversarial_loss(validity_real, valid)
 
         # Loss for fake images
         fake_imgs = gen_imgs.detach()
         # fake_imgs = torch.zeros_like(fake_imgs) # TODO: remove me!!!!!
         validity_fake = discriminator(fake_imgs, pred_imgs)
-        print("Validity fake:", validity_fake)
+        # print("Validity fake:", validity_fake)
         d_fake_loss = adversarial_loss(validity_fake, fake)
 
         # Total discriminator loss
