@@ -142,8 +142,9 @@ class Dataset(torch.utils.data.Dataset):
         # In other words, the input is 23,876 points, and the reference is 125,965 points
 
         t = time.time()
-        prec_pred = pred_points['PREC'].values
-        prec_real = real_point['RR'].values
+        # TODO: use actual sizes, not cropped images
+        prec_pred = pred_points['PREC'].values[:,:127]
+        prec_real = real_point['RR'].values[:256,:256]
         # print(f"[Time] Get values {time.time() - t}")
 
         t = time.time()
