@@ -1,28 +1,31 @@
 import argparse
 import os
+import datetime
 import warnings
 
 import torch
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from torch.autograd import Variable
 
 from dataset import Dataset
 from modules import Generator, Discriminator
-from util import init_weights, sample_image
+from util import init_weights, sample_image, plot_image
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--n_epochs", type=int, default=200, help="number of epochs of training")
+    parser.add_argument("--n_epochs", type=int, default=50, help="number of epochs of training")
     parser.add_argument("--batch_size", type=int, default=8, help="size of the batches")
     parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
     parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
     parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
-    parser.add_argument("--sample_interval", type=int, default=10, help="interval between image sampling")
+    parser.add_argument("--sample_interval", type=int, default=100, help="interval between image sampling")
     opt = parser.parse_args()
     print(opt)
 
     os.makedirs("images", exist_ok=True)
+    writer = SummaryWriter('runs/{}'.format(datetime.datetime.now()))
 
     # input_shape = (127, 188)
     # output_shape = (295, 427)
@@ -73,7 +76,7 @@ if __name__ == "__main__":
     # ----------
     #  Training
     # ----------
-
+    iter = 0
     for epoch in range(opt.n_epochs):
         print("Starting epoch %d" % epoch)
 
@@ -126,7 +129,6 @@ if __name__ == "__main__":
 
             # Loss for fake images
             fake_imgs = gen_imgs.detach()
-            # fake_imgs = torch.zeros_like(fake_imgs) # TODO: remove me!!!!!
             validity_fake = discriminator(fake_imgs, pred_imgs)
             d_fake_loss = adversarial_loss(validity_fake, fake)
 
@@ -141,6 +143,14 @@ if __name__ == "__main__":
                 % (epoch, opt.n_epochs, i, len(training_generator), d_loss.item(), g_loss.item())
             )
 
+            iter += 1
+            writer.add_scalar('Discriminator loss', d_loss.item(), iter)
+            writer.add_scalar('Generator loss', g_loss.item(), iter)
+
             batches_done = epoch * len(training_generator) + i
             if batches_done % opt.sample_interval == 0:
-                sample_image(training_data, n_row=10, batches_done=batches_done, generator=generator, device=device)
+                lsd = sample_image(training_data, n_row=10, batches_done=batches_done, generator=generator, device=device)
+                # writer.add_scalar('CRPS', crps, batches_done)
+                writer.add_scalar('Log spectral distance', lsd, batches_done)
+                writer.add_figure('Generated images', plot_image(training_data, generator, device),
+                                  global_step=batches_done)

@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import torch
 from torch.nn import init
+from verification import crps, log_spectral_distance
 
 def init_weights(m):
     classname = m.__class__.__name__
@@ -32,3 +33,29 @@ def sample_image(training_data, n_row, batches_done, generator, device):
     plt.imshow(y_real.squeeze().detach().cpu())
     plt.colorbar(orientation='horizontal')
     plt.savefig("images/%d.png" % batches_done)
+
+    gen_imgs = gen_imgs.squeeze(1).squeeze(0).detach().cpu().numpy()
+    y_real = y_real.squeeze(1).squeeze(0).detach().cpu().numpy()
+    # crps_score = crps(gen_imgs, y_real)
+    lsd_score = log_spectral_distance(gen_imgs, y_real)
+    return lsd_score
+
+def plot_image(training_data, generator, device):
+    n_row = 1  # FIXME
+    y_pred, y_real = training_data.get_x_y_by_id(training_data.selected_indices[0])  # TODO: fix first date from 201805
+    y_pred = torch.tensor(y_pred, device=device).repeat(n_row, 1, 1) / 10
+    y_real = torch.tensor(y_real, device=device).repeat(n_row, 1, 1) / 10
+    y_pred = y_pred.unsqueeze(1)
+    y_real = y_real.unsqueeze(1)
+    gen_imgs = generator(y_pred)
+
+    fig = plt.figure(figsize=(6, 3.2))
+    ax = fig.add_subplot(121)
+    ax.set_title('Output')
+    plt.imshow(gen_imgs.squeeze().detach().cpu())
+
+    ax = fig.add_subplot(122)
+    ax.set_title('Observation')
+    plt.imshow(y_real.squeeze().detach().cpu())
+
+    return fig
