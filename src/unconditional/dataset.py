@@ -27,7 +27,7 @@ class WGANDataset(Dataset):
 
     def load_observations(self):
         if self.on_cluster:
-            path = join(self.base_dir, "combiprecip", "../combiprecip_201805.nc")
+            path = join(self.base_dir, "combiprecip", "combiprecip_201805.nc")
         else:
             path = "../combiprecip_201805.nc"
         weather = xr.open_mfdataset(path, combine='by_coords')

@@ -28,7 +28,7 @@ def sample_image(generator, cuda, n_row, latent_dim, img_shape):
     # plt.colorbar(orientation='horizontal')
     fig, axs = plt.subplots(ncols=n_row, figsize=(5*n_row, 5))
     for i in range(gen_imgs.shape[0]):
-        axs[i].pcolormesh(gen_imgs[i,:,:].data, cmap='viridis')
+        axs[i].pcolormesh(gen_imgs[i,:,:].cpu().data, cmap='viridis')
     return fig
 
 
@@ -49,6 +49,7 @@ if __name__ == "__main__":
 
     cuda = True if torch.cuda.is_available() else False
     on_cluster = True if socket.gethostname().endswith(".ethz.ch") else False
+    print(f"CUDA: {cuda}, On cluster: {on_cluster}")
 
     # Initialize generator and discriminator
     generator = Generator(opt.latent_dim, opt.img_shape)
