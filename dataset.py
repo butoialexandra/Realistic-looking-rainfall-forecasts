@@ -19,7 +19,11 @@ from sklearn.model_selection import train_test_split
 
 
 base_dir = "/mnt/ds3lab-scratch/bhendj/data"
+<<<<<<< HEAD
 on_cluster = True
+=======
+on_cluster = False
+>>>>>>> 99ddee42dc85424d8674af90beff94f3a7b8b3d6
 
 def load_observations(verbose=True):
     """
@@ -39,7 +43,11 @@ def load_observations(verbose=True):
             files[f"{dt.year}{dt.month:02d}"] = obj
             dt = dt + relativedelta(months=1)
     else:
+<<<<<<< HEAD
         path = "./combiprecip_201805.nc"
+=======
+        path = "combiprecip_201805.nc"
+>>>>>>> 99ddee42dc85424d8674af90beff94f3a7b8b3d6
         weather = xr.open_mfdataset(path, combine='by_coords')
         files['201805'] = weather
     return files
@@ -54,7 +62,11 @@ def load_predictions():
     if on_cluster:
         path = join(base_dir, "cosmoe", "data.zarr", "data_ethz.zarr")
     else:
+<<<<<<< HEAD
         path = "./cosmoe_prec_201805.zarr"
+=======
+        path = "cosmoe_prec_201805.zarr"
+>>>>>>> 99ddee42dc85424d8674af90beff94f3a7b8b3d6
 
     cosmo = xr.open_zarr(path)
 
@@ -142,8 +154,9 @@ class Dataset(torch.utils.data.Dataset):
         # In other words, the input is 23,876 points, and the reference is 125,965 points
 
         t = time.time()
-        prec_pred = pred_points['PREC'].values
-        prec_real = real_point['RR'].values
+        # TODO: use actual sizes, not cropped images
+        prec_pred = pred_points['PREC'].values[:,:127]
+        prec_real = real_point['RR'].values[:256,:256]
         # print(f"[Time] Get values {time.time() - t}")
 
         t = time.time()
