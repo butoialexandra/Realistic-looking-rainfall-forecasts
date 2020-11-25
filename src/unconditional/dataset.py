@@ -60,6 +60,3 @@ if __name__ == "__main__":
         sample = dataset[i]
         plt.pcolormesh(sample)
         plt.show()
-
-
-

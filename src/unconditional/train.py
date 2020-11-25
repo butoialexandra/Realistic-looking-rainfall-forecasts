@@ -8,9 +8,12 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch.autograd import Variable
 
-from unconditional.discriminator import Discriminator
-from unconditional.generator import Generator
-from unconditional.dataset import WGANDataset
+import socket
+
+from .discriminator import Discriminator
+from .generator import Generator
+from .dataset import WGANDataset
+
 
 def sample_image(generator, cuda, n_row, latent_dim, img_shape):
     FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
@@ -45,7 +48,7 @@ if __name__ == "__main__":
     print(opt)
 
     cuda = True if torch.cuda.is_available() else False
-    on_cluster = False
+    on_cluster = True if socket.gethostname().endswith(".ethz.ch") else False
 
     # Initialize generator and discriminator
     generator = Generator(opt.latent_dim, opt.img_shape)
