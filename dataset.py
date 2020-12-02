@@ -102,12 +102,23 @@ class UnconditionalDataset(torch.utils.data.Dataset):
         self.predicted_images = np.delete(self.predicted_images, nan_indices, axis=0)
 
     def standardize_images(self):
+        self.normalize()
         #Standardizing to 0.5 mean, 0.5 std
-        self.predicted_images -= np.mean(self.predicted_images, axis=0, keepdims=True)
-        self.predicted_images /= 2.0*np.std(self.predicted_images, axis = 0, keepdims=True)
-        self.predicted_images += 0.5
-        self.predicted_images = np.expand_dims(self.predicted_images, axis=1)
+        # self.predicted_images -= np.mean(self.predicted_images, axis=0, keepdims=True)
+        # self.predicted_images /= 2.0*np.std(self.predicted_images, axis = 0, keepdims=True)
+        # self.predicted_images += 0.5
+        # self.predicted_images = np.expand_dims(self.predicted_images, axis=1)
     
+    def normalize(self):
+        # Mean              Stddev              Min      Max
+        # 0.314654152002613 1.0515969624985164 -0.015625 97.326171875
+        self.predicted_images /= 10.0
+        # 0.03147736358815389 0.10518044480120241 -0.0015625 9.7326171875
+        self.predicted_images = np.clip(self.predicted_images, a_min=0.0, a_max=1.0)
+        # print(self.predicted_images.mean(), self.predicted_images.std(), self.predicted_images.min(), self.predicted_images.max())
+        # raise
+        self.predicted_images = np.expand_dims(self.predicted_images, axis=1)
+
     def __len__(self):
         return len(self.predicted_images)
 

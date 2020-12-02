@@ -12,6 +12,9 @@ import torchvision.datasets as dset
 import torchvision.transforms as transforms
 import torchvision.utils as vutils
 from dataset import UnconditionalDataset
+from torch.utils.tensorboard import SummaryWriter
+
+# from src.unconditional.discriminator import DiscriminatorMy
 
 from datetime import datetime
 import os
@@ -65,7 +68,7 @@ if torch.cuda.is_available() and not opt.cuda:
 if opt.dataroot is None and str(opt.dataset).lower() in ['imagenet', 'folder', 'lfw', 'lsun', 'cifar10', 'mnist']:
     raise ValueError("`dataroot` parameter is required for dataset \"%s\"" % opt.dataset)
 
-device = torch.device("cuda:0" if opt.cuda else "cpu")
+device = torch.device("cuda:1" if opt.cuda else "cpu")
 if opt.dataset in ['imagenet', 'folder', 'lfw']:
     # folder dataset
     dataset = dset.ImageFolder(root=opt.dataroot,
@@ -123,14 +126,31 @@ nz = int(opt.nz)
 ngf = int(opt.ngf)
 ndf = int(opt.ndf)
 
-# function to plot images
-def plot_images(images, path):
-    plt.figure(figsize=(16,16))
-    nrow = np.sqrt(images.shape[0])
-    for i in range(images.shape[0]):
-        plt.subplot(8,8,i+1)
-        plt.imshow(images[i][0], vmin=0, vmax=1)
-    plt.savefig(path)
+# # function to plot images
+# def plot_images(images, path):
+#     plt.figure(figsize=(16,16))
+#     nrow = np.sqrt(images.shape[0])
+#     for i in range(images.shape[0]):
+#         plt.subplot(8,8,i+1)
+#         plt.imshow(images[i][0], vmin=0, vmax=1)
+#     plt.savefig(path)
+
+
+def plot_images(gen_imgs, save_path):
+    ndata = gen_imgs.shape[0]
+    ncols = 5
+    nrows = int(ndata/5) + 1
+    fig, axs = plt.subplots(ncols=ncols, nrows=nrows, figsize=(6*ncols,5*nrows))#, figsize=(5*ncols, 5))
+    for i in range(gen_imgs.shape[0]):
+        x = int(i % nrows)
+        y = int(i / nrows)
+        im = axs[x,y].pcolormesh(gen_imgs[i,0,:,:].cpu().data, cmap='viridis')
+        fig.colorbar(im, ax=axs[x,y])
+    # for i in range(real_imgs.shape[0]):
+        # im = axs[1, i].pcolormesh(real_imgs[i,:,:].cpu().data, cmap='viridis')
+        # fig.colorbar(im, ax=axs[1, i])
+    plt.savefig(save_path)
+    return fig
 
 
 # custom weights initialization called on netG and netD
@@ -170,7 +190,7 @@ class Generator(nn.Module):
             nn.ReLU(True),
             # state size. (ngf) x 64 x 64
             nn.ConvTranspose2d(    ngf,      nc, 4, 2, 1, bias=False),
-            nn.Tanh()
+            nn.Sigmoid()
             # state size. (nc) x 128 x 128
         )
 
@@ -261,27 +281,28 @@ class Discriminator(nn.Module):
     def __init__(self, ngpu):
         super(Discriminator, self).__init__()
         self.ngpu = ngpu
+        bias = False
         self.main = nn.Sequential(
             # input is (nc) x 128 x 192
-            nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
+            nn.Conv2d(nc, ndf, 4, 2, 1, bias=bias),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf) x 64 x 96
-            nn.Conv2d(ndf, ndf, 4, 2, 1, bias=False),
+            nn.Conv2d(ndf, ndf, 4, 2, 1, bias=bias),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf) x 32 x 48
-            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
+            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=bias),
             nn.BatchNorm2d(ndf * 2),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*2) x 16 x 24
-            nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
+            nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=bias),
             nn.BatchNorm2d(ndf * 4),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*4) x 8 x 12
-            nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
+            nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=bias),
             nn.BatchNorm2d(ndf * 8),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*8) x 4 x 6
-            nn.Conv2d(ndf * 8, 1, (4,6), 1, 0, bias=False),
+            nn.Conv2d(ndf * 8, 1, (4,6), 1, 0, bias=bias),
             nn.Sigmoid()
         )
 
@@ -307,11 +328,15 @@ real_label = 1
 fake_label = 0
 
 # setup optimizer
-optimizerD = optim.Adam(netD.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
-optimizerG = optim.Adam(netG.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
+optimizerD = optim.Adam(netD.parameters(), lr=opt.lr / 2, betas=(0.5, 0.999))
+optimizerG = optim.Adam(netG.parameters(), lr=opt.lr * 2, betas=(0.5, 0.999))
 
 if opt.dry_run:
     opt.niter = 1
+
+writer = SummaryWriter(f"{opt.outf}")
+skip_d = False
+
 
 for epoch in range(opt.niter):
     for i, data in enumerate(dataloader, 0):
@@ -324,52 +349,66 @@ for epoch in range(opt.niter):
             real_cpu = data.to(device)
         else:
             real_cpu = data[0].to(device)
+        
         real_cpu = real_cpu.float()
         batch_size = real_cpu.size(0)
         label = torch.full((batch_size,), real_label,
                            dtype=real_cpu.dtype, device=device)
         output = netD(real_cpu)
-        errD_real = criterion(output, label)
-        errD_real.backward()
+        loss_D_real = criterion(output, label)
+        # loss_D_real.backward()
         D_x = output.mean().item()
 
         # train with fake
         noise = torch.randn(batch_size, nz, 1, 1, device=device)
         fake = netG(noise)
-        label.fill_(fake_label)
+        fake_label = torch.zeros_like(label)
         output = netD(fake.detach())
-        errD_fake = criterion(output, label)
-        errD_fake.backward()
+        loss_D_fake = criterion(output, fake_label)
+        # loss_D_fake.backward()
         D_G_z1 = output.mean().item()
-        errD = errD_real + errD_fake
-        optimizerD.step()
+        loss_D = loss_D_real + loss_D_fake
+
+        if not skip_d:
+            loss_D.backward()
+            torch.nn.utils.clip_grad_norm_(netD.parameters(), 1.0)
+            optimizerD.step()
+        skip_d = False
 
         ############################
         # (2) Update G network: maximize log(D(G(z)))
         ###########################
         netG.zero_grad()
-        label.fill_(real_label)  # fake labels are real for generator cost
+        noise = torch.randn(batch_size, nz, 1, 1, device=device)
+        real_labels = torch.ones_like(label)
+        # label.fill_(real_label)  # fake labels are real for generator cost
+        fake = netG(noise)
         output = netD(fake)
-        errG = criterion(output, label)
-        errG.backward()
+        loss_G = criterion(output, real_labels)
+        # loss_G = torch.mean((netD(netG(noise)) - torch.ones_like(label)) ** 2)
+        loss_G.backward()
+        torch.nn.utils.clip_grad_norm_(netG.parameters(), 1.0)
         D_G_z2 = output.mean().item()
         optimizerG.step()
 
+        if loss_G > 10.0 and loss_D < 0.10:
+            skip_d = True
+
         print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f D(x): %.4f D(G(z)): %.4f / %.4f'
               % (epoch, opt.niter, i, len(dataloader),
-                 errD.item(), errG.item(), D_x, D_G_z1, D_G_z2))
-        if i % 100 == 0:
-            #vutils.save_image(real_cpu,
-            #        '%s/real_samples.png' % opt.outf,
-            #        normalize=True)
-            plot_images(real_cpu.cpu().numpy(), f"{opt.outf}/real_samples.png")
+                 loss_D.item(), loss_G.item(), D_x, D_G_z1, D_G_z2))
+        writer.add_scalar('Discriminator loss', loss_D.item(), epoch * len(dataloader) + i)
+        writer.add_scalar('Generator loss', loss_G.item(), epoch * len(dataloader) + i)
+
+        if i == 0:#% 100 == 0:
+            if i == 0:
+                plot_images(real_cpu, f"{opt.outf}/real_samples.png")
             fake = netG(fixed_noise)
-            #vutils.save_image(fake.detach(),
-            #        '%s/fake_samples_epoch_%03d.png' % (opt.outf, epoch),
-            #        normalize=True)
-            plot_images(fake.detach().cpu().numpy(), f"{opt.outf}/fake_samples_epoch_{epoch}.png")
+            fig = plot_images(fake.detach(), f"{opt.outf}/fake_samples_epoch_{epoch}.png")
+            writer.add_figure('Generated images', fig, global_step=epoch * len(dataloader) + 1)
         if opt.dry_run:
             break
     # do checkpointing
-    torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (opt.outf, epoch))
-    torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (opt.outf, epoch))
+    if epoch % 5 == 0:
+        torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (opt.outf, epoch))
+        torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (opt.outf, epoch))
