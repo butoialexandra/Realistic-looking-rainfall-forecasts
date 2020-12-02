@@ -20,7 +20,9 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
     parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
     parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
-    parser.add_argument("--sample_interval", type=int, default=100, help="interval between image sampling")
+    parser.add_argument("--sample_interval", type=int, default=5, help="interval between image sampling")
+    parser.add_argument("--n_critic", type=int, default=1, help="number of training steps for discriminator per iter")
+    parser.add_argument("--clip_value", type=float, default=0.01, help="lower and upper clip value for disc. weights")
     opt = parser.parse_args()
     print(opt)
 
@@ -44,7 +46,7 @@ if __name__ == "__main__":
 
     # Initialize generator and discriminator
     generator = Generator(bias=False, norm="batch")
-    discriminator = Discriminator(bias=False, norm="batch", sigmoid=True)
+    discriminator = Discriminator(bias=False, norm="batch", sigmoid=False)
 
     # Initialize xavier
     generator.apply(init_weights)
@@ -76,46 +78,23 @@ if __name__ == "__main__":
     # ----------
     #  Training
     # ----------
-    iter = 0
+    iter_d = 0
+    iter_g = 0
     for epoch in range(opt.n_epochs):
         print("Starting epoch %d" % epoch)
 
         for i, (pred_imgs, real_imgs) in enumerate(training_generator):
 
             batch_size = pred_imgs.shape[0]
-            pred_imgs = pred_imgs.unsqueeze(1)
-            real_imgs = real_imgs.unsqueeze(1)
+            # pred_imgs = pred_imgs.unsqueeze(1)
+            # real_imgs = real_imgs.unsqueeze(1)
             if torch.any(pred_imgs.isnan()):
                 warnings.warn("Skipping batch with nan value")
                 continue
 
-            # Adversarial ground truths
-            valid = Variable(FloatTensor(batch_size, 1).fill_(1.0), requires_grad=False)
-            fake = Variable(FloatTensor(batch_size, 1).fill_(0.0), requires_grad=False)
-
             # Configure input
-            real_imgs = Variable(real_imgs.type(FloatTensor)) / 10
-            pred_imgs = Variable(pred_imgs.type(FloatTensor)) / 10
-
-            # -----------------
-            #  Train Generator
-            # -----------------
-
-            optimizer_G.zero_grad()
-
-            # Sample noise and labels as generator input
-            # z = Variable(FloatTensor(np.random.normal(0, 1, (batch_size, opt.latent_dim))))
-            # gen_labels = Variable(LongTensor(np.random.randint(0, opt.n_classes, batch_size)))
-
-            # Generate a batch of images
-            gen_imgs = generator(pred_imgs)
-
-            # Loss measures generator's ability to fool the discriminator
-            validity = discriminator(gen_imgs, pred_imgs)
-            g_loss = adversarial_loss(validity, valid)
-
-            g_loss.backward()
-            optimizer_G.step()
+            real_imgs = Variable(real_imgs.type(FloatTensor))
+            pred_imgs = Variable(pred_imgs.type(FloatTensor))
 
             # ---------------------
             #  Train Discriminator
@@ -123,29 +102,48 @@ if __name__ == "__main__":
 
             optimizer_D.zero_grad()
 
-            # Loss for real images
-            validity_real = discriminator(real_imgs, pred_imgs)
-            d_real_loss = adversarial_loss(validity_real, valid)
+            # Generate a batch of images
+            gen_imgs = generator(pred_imgs)
 
-            # Loss for fake images
-            fake_imgs = gen_imgs.detach()
-            validity_fake = discriminator(fake_imgs, pred_imgs)
-            d_fake_loss = adversarial_loss(validity_fake, fake)
-
-            # Total discriminator loss
-            d_loss = (d_real_loss + d_fake_loss) / 2
+            # Adversarial loss
+            d_loss = -torch.mean(discriminator(real_imgs, pred_imgs)) + torch.mean(discriminator(gen_imgs, pred_imgs))
 
             d_loss.backward()
             optimizer_D.step()
 
-            print(
-                "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
-                % (epoch, opt.n_epochs, i, len(training_generator), d_loss.item(), g_loss.item())
-            )
+            # Clip weights of discriminator
+            for p in discriminator.parameters():
+                p.data.clamp_(-opt.clip_value, opt.clip_value)
 
-            iter += 1
-            writer.add_scalar('Discriminator loss', d_loss.item(), iter)
-            writer.add_scalar('Generator loss', g_loss.item(), iter)
+                # Adversarial ground truths
+            valid = Variable(FloatTensor(batch_size, 1).fill_(1.0), requires_grad=False)
+            fake = Variable(FloatTensor(batch_size, 1).fill_(0.0), requires_grad=False)
+
+            iter_d += 1
+            writer.add_scalar('Discriminator loss', d_loss.item(), iter_d)
+
+            # Train the generator every n_critic iterations
+            if i % opt.n_critic == 0:
+                # -----------------
+                #  Train Generator
+                # -----------------
+                optimizer_G.zero_grad()
+
+                # Generate a batch of images
+                gen_imgs = generator(pred_imgs)
+                # Adversarial loss
+                g_loss = -torch.mean(discriminator(gen_imgs, pred_imgs))
+
+                g_loss.backward()
+                optimizer_G.step()
+
+                print(
+                    "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
+                    % (epoch, opt.n_epochs, i, len(training_generator), d_loss.item(), g_loss.item())
+                )
+
+                iter_g += 1
+                writer.add_scalar('Generator loss', g_loss.item(), iter_g)
 
             batches_done = epoch * len(training_generator) + i
             if batches_done % opt.sample_interval == 0:

@@ -1,7 +1,6 @@
-
 import torch
+from torchvision import transforms
 
-import os
 import random
 import warnings
 import time
@@ -75,6 +74,10 @@ class Dataset(torch.utils.data.Dataset):
         self.observations = load_observations()
         self.cosmo = load_predictions()
         self.top_left, self.bottom_right = self.compute_nearest_neighbors()
+        self.transform = transforms.Compose([
+            transforms.Normalize(mean=[0.5],
+                                 std=[0.5])
+        ])
     
     def __len__(self):
         return len(self.selected_indices)
@@ -197,6 +200,10 @@ class Dataset(torch.utils.data.Dataset):
         t = time.time()
         x = torch.tensor(x, device=self.device)
         y = torch.tensor(y, device=self.device)
+        x = x.unsqueeze(0)
+        y = y.unsqueeze(0)
+        x = self.transform(x)
+        y = self.transform(y)
         # print(f"[Time] Copy into tensors {(time.time() - t):.4f} s")
         return x, y
 

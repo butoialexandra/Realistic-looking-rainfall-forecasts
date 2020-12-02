@@ -132,7 +132,7 @@ class EncoderBlock(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, in_channels=1, out_channels=1, bias = False, norm = 'batch', sigmoid=True):
+    def __init__(self, in_channels=1, out_channels=1, bias = False, norm = 'batch', sigmoid=False):
         super(Discriminator, self).__init__()
 
         self.sigmoid = sigmoid
@@ -173,20 +173,16 @@ class Generator(nn.Module):
         super(Generator, self).__init__()
         model = []
         model += [Conv_Norm_ReLU(in_channels, 32, (7, 7), padding=3, stride=1, bias=bias, do_norm=do_norm, norm=norm),
-                  # c7s1-32
-                  Conv_Norm_ReLU(32, 64, (3, 3), padding=1, stride=2, bias=bias, do_norm=do_norm, norm=norm),  # d64
-                  Conv_Norm_ReLU(64, 128, (3, 3), padding=1, stride=2, bias=bias, do_norm=do_norm, norm=norm)]  # d128
+                  Conv_Norm_ReLU(32, 64, (3, 3), padding=1, stride=2, bias=bias, do_norm=do_norm, norm=norm),
+                  Conv_Norm_ReLU(64, 128, (3, 3), padding=1, stride=2, bias=bias, do_norm=do_norm, norm=norm)]
         for i in range(9):
-            model += [ResidualLayer(128, (3, 3), final_relu=False, bias=bias)]  # R128
+            model += [ResidualLayer(128, (3, 3), final_relu=False, bias=bias)]
         model += [
             Deconv_Norm_ReLU(128, 64, (3, 3), padding=1, output_padding=1, stride=2, bias=bias, do_norm=do_norm, norm=norm),
-            # u64
             Deconv_Norm_ReLU(64, 32, (3, 3), padding=1, output_padding=1, stride=2, bias=bias, do_norm=do_norm, norm=norm),
-
             Deconv_Norm_ReLU(32, 16, (3, 3), padding=1, output_padding=1, stride=2, bias=bias, do_norm=do_norm,
                              norm=norm),
-            # u32
-            nn.Conv2d(16, out_channels, (7, 7), padding=3, stride=1, bias=bias),  # c7s1-3
+            nn.Conv2d(16, out_channels, (7, 7), padding=3, stride=1, bias=bias),
             nn.Tanh()]
         self.model = nn.Sequential(*model)
 

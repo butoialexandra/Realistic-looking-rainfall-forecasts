@@ -53,9 +53,11 @@ def plot_image(training_data, generator, device):
     ax = fig.add_subplot(121)
     ax.set_title('Output')
     plt.imshow(gen_imgs.squeeze().detach().cpu())
+    plt.colorbar()
 
     ax = fig.add_subplot(122)
     ax.set_title('Observation')
     plt.imshow(y_real.squeeze().detach().cpu())
+    plt.colorbar()
 
     return fig
