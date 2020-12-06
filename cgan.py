@@ -2,6 +2,7 @@ import argparse
 import os
 import datetime
 import warnings
+import numpy as np
 
 import torch
 from torch.utils.data import DataLoader
@@ -17,21 +18,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--n_epochs", type=int, default=50, help="number of epochs of training")
     parser.add_argument("--batch_size", type=int, default=8, help="size of the batches")
-    parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
+    parser.add_argument("--lr", type=float, default=0.002, help="adam: learning rate")
     parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
     parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
     parser.add_argument("--sample_interval", type=int, default=5, help="interval between image sampling")
-    parser.add_argument("--n_critic", type=int, default=1, help="number of training steps for discriminator per iter")
-    parser.add_argument("--clip_value", type=float, default=0.01, help="lower and upper clip value for disc. weights")
+    parser.add_argument("--n_critic", type=int, default=5, help="number of training steps for discriminator per iter")
+    parser.add_argument("--clip_value", type=float, default=1, help="lower and upper clip value for disc. weights")
+    parser.add_argument("--device", type=int, default=0, help="the ID of the gpu to run on")
     opt = parser.parse_args()
     print(opt)
 
     os.makedirs("images", exist_ok=True)
     writer = SummaryWriter('runs/{}'.format(datetime.datetime.now()))
-
-    # input_shape = (127, 188)
-    # output_shape = (295, 427)
-    # TODO: make sure we didn't mix up x, y from dataset
 
     if torch.cuda.is_available():
         cuda = True
@@ -39,14 +37,14 @@ if __name__ == "__main__":
     else:
         cuda = False
         print("NOT using CUDA")
-    device = torch.device("cuda:0" if cuda else "cpu")
+    device = torch.device("cuda:{}".format(opt.device) if cuda else "cpu")
 
     # Loss functions
-    adversarial_loss = torch.nn.MSELoss()
+    adversarial_loss = torch.nn.BCELoss()
 
     # Initialize generator and discriminator
-    generator = Generator(bias=False, norm="batch")
-    discriminator = Discriminator(bias=False, norm="batch", sigmoid=False)
+    generator = Generator()
+    discriminator = Discriminator()
 
     # Initialize xavier
     generator.apply(init_weights)
@@ -86,8 +84,6 @@ if __name__ == "__main__":
         for i, (pred_imgs, real_imgs) in enumerate(training_generator):
 
             batch_size = pred_imgs.shape[0]
-            # pred_imgs = pred_imgs.unsqueeze(1)
-            # real_imgs = real_imgs.unsqueeze(1)
             if torch.any(pred_imgs.isnan()):
                 warnings.warn("Skipping batch with nan value")
                 continue
@@ -102,8 +98,11 @@ if __name__ == "__main__":
 
             optimizer_D.zero_grad()
 
+            # Sample noise as generator input
+            noise = Variable(torch.tensor(np.random.normal(0, 1, (batch_size, 8, 32, 32))).type(FloatTensor))
+
             # Generate a batch of images
-            gen_imgs = generator(pred_imgs)
+            gen_imgs = generator(pred_imgs, noise)
 
             # Adversarial loss
             d_loss = -torch.mean(discriminator(real_imgs, pred_imgs)) + torch.mean(discriminator(gen_imgs, pred_imgs))
@@ -130,7 +129,7 @@ if __name__ == "__main__":
                 optimizer_G.zero_grad()
 
                 # Generate a batch of images
-                gen_imgs = generator(pred_imgs)
+                gen_imgs = generator(pred_imgs, noise)
                 # Adversarial loss
                 g_loss = -torch.mean(discriminator(gen_imgs, pred_imgs))
 

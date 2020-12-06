@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
 import torch
+import numpy as np
 from torch.nn import init
+from torch.autograd import Variable
 from verification import crps, log_spectral_distance
 
 def init_weights(m):
@@ -17,11 +19,13 @@ def sample_image(training_data, n_row, batches_done, generator, device):
     # z = Variable(FloatTensor(np.random.normal(0, 1, (n_row, opt.latent_dim))))
     # Get labels ranging from 0 to n_classes for n rows
     y_pred, y_real = training_data.get_x_y_by_id(training_data.selected_indices[0])  # TODO: fix first date from 201805
-    y_pred = torch.tensor(y_pred, device=device).repeat(n_row, 1, 1) / 10
-    y_real = torch.tensor(y_real, device=device).repeat(n_row, 1, 1) / 10
+    y_pred = torch.tensor(y_pred, device=device).repeat(n_row, 1, 1)
+    y_real = torch.tensor(y_real, device=device).repeat(n_row, 1, 1)
     y_pred = y_pred.unsqueeze(1)
     y_real = y_real.unsqueeze(1)
-    gen_imgs = generator(y_pred)
+    FloatTensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
+    noise = Variable(torch.tensor(np.random.normal(0, 1, (1, 8, 32, 32))).type(FloatTensor))
+    gen_imgs = generator(y_pred, noise)
 
     fig = plt.figure(figsize=(6, 3.2))
     ax = fig.add_subplot(121)
@@ -47,7 +51,9 @@ def plot_image(training_data, generator, device):
     y_real = torch.tensor(y_real, device=device).repeat(n_row, 1, 1) / 10
     y_pred = y_pred.unsqueeze(1)
     y_real = y_real.unsqueeze(1)
-    gen_imgs = generator(y_pred)
+    FloatTensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
+    noise = Variable(torch.tensor(np.random.normal(0, 1, (1, 8, 32, 32))).type(FloatTensor))
+    gen_imgs = generator(y_pred, noise)
 
     fig = plt.figure(figsize=(6, 3.2))
     ax = fig.add_subplot(121)

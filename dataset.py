@@ -75,8 +75,8 @@ class Dataset(torch.utils.data.Dataset):
         self.cosmo = load_predictions()
         self.top_left, self.bottom_right = self.compute_nearest_neighbors()
         self.transform = transforms.Compose([
-            transforms.Normalize(mean=[0.5],
-                                 std=[0.5])
+            transforms.Normalize(mean=[0],
+                                 std=[1])
         ])
     
     def __len__(self):
