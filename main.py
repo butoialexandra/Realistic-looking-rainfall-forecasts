@@ -11,15 +11,19 @@ import torch.utils.data
 import torchvision.datasets as dset
 import torchvision.transforms as transforms
 import torchvision.utils as vutils
-from dataset import UnconditionalDataset
+from dataset import UnconditionalDataset, ConditionalDataset, UnconditionalDatasetObservations
+from torch.utils.tensorboard import SummaryWriter
 
 from datetime import datetime
 import os
 import matplotlib.pyplot as plt
 import numpy as np
 
+import time
+
 datetimestr = datetime.now().strftime("%d-%b-%Y-%H:%M")
 output_dir = f"ouput_{datetimestr}"
+writer = SummaryWriter()
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', required=True, help='cosmo | cifar10 | lsun | mnist |imagenet | folder | lfw | fake')
@@ -43,6 +47,7 @@ parser.add_argument('--manualSeed', type=int, help='manual seed')
 parser.add_argument('--classes', default='bedroom', help='comma separated list of classes for the lsun data set')
 parser.add_argument('--on_cluster', default=False, action='store_true', help='flag to indicate if using cluster')
 parser.add_argument('--conditional', default=False, action='store_true', help='flag to indicate if using cluster')
+parser.add_argument('--highres', default=False, action='store_true', help='flag to indicate if using cluster')
 opt = parser.parse_args()
 print(opt)
 
@@ -106,7 +111,12 @@ elif opt.dataset == 'mnist':
 
 
 elif opt.dataset == 'cosmo':
-    dataset = UnconditionalDataset(device=device, on_cluster=opt.on_cluster)
+    if opt.conditional:
+        dataset = ConditionalDataset(device=device, highres = opt.highres)
+    else:
+        dataset = UnconditionalDatasetObservations(device=device, on_cluster=opt.on_cluster)
+        print("Finished loading dataset")
+    main_time = time.time()
     nc = 1
 
 elif opt.dataset == 'fake':
@@ -117,21 +127,44 @@ elif opt.dataset == 'fake':
 assert dataset
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
                                          shuffle=False, num_workers=int(opt.workers))
+print("Finished Dataloader", time.time()-main_time)
+main_time = time.time()
 
 ngpu = int(opt.ngpu)
 nz = int(opt.nz)
 ngf = int(opt.ngf)
 ndf = int(opt.ndf)
 
+
+print("Finished setting parameters", time.time()-main_time)
+main_time = time.time()
 # function to plot images
 def plot_images(images, path):
-    plt.figure(figsize=(16,16))
-    nrow = np.sqrt(images.shape[0])
+    fig, axs =  plt.subplots(ncols=8, nrows=8, figsize=(16,16))
+    #nrow = np.sqrt(images.shape[0])
     for i in range(images.shape[0]):
-        plt.subplot(8,8,i+1)
-        plt.imshow(images[i][0], vmin=0, vmax=1)
+        row_num = int(i / 8)
+        col_num = int(i % 8)
+        im = axs[row_num, col_num].pcolormesh(images[i,0], vmin=0, vmax=1, cmap='viridis')
+        fig.colorbar(im, ax=axs[row_num, col_num])
     plt.savefig(path)
 
+
+#Function to plot single image pair -- conditional
+def plot_image_single_conditional(generated, observed, path):
+    plt.figure(figsize=(6,3.2))
+    fig, ax  = plt.subplots(1,2)
+    ax[0].set_title("Generated")
+    ax[0].imshow(generated, vmin=0, vmax=1)
+    ax[1].set_title("Observed")
+    ax[1].imshow(observed, vmin=0, vmax=1)
+    plt.savefig(path)
+
+#Function to plot single image unconditional
+def plot_image_single_unconditional(generated, path):
+    plt.figure(figsize=(4,4))
+    plt.imshow(generated, vmin=0, vmax=1)
+    plt.savefig(path)
 
 # custom weights initialization called on netG and netD
 def weights_init(m):
@@ -182,6 +215,47 @@ class Generator(nn.Module):
         return output
 
 
+class GeneratorHighres(nn.Module):
+    def __init__(self, ngpu):
+        super(GeneratorHighres, self).__init__()
+        self.ngpu = ngpu
+        self.main = nn.Sequential(
+            # input is Z, going into a convolution
+            nn.ConvTranspose2d(     nz, ngf * 32, (4,6), 1, 0, bias=False),
+            nn.BatchNorm2d(ngf * 32),
+            nn.ReLU(True),
+            # state size. (ngf*16) x 4 x 4
+            nn.ConvTranspose2d(ngf * 32, ngf * 16, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 16),
+            nn.ReLU(True),
+            # state size. (ngf*8) x 8 x 8
+            nn.ConvTranspose2d(ngf * 16, ngf * 8, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 8),
+            nn.ReLU(True),
+            # state size. (ngf*4) x 16 x 16
+            nn.ConvTranspose2d(ngf * 8,     ngf*4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf*4),
+            nn.ReLU(True),
+            # state size. (ngf*2) x 32 x 32
+            nn.ConvTranspose2d(ngf * 4,     ngf*2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf*2),
+            nn.ReLU(True),
+            # state size. (ngf*2) x 32 x 32
+            nn.ConvTranspose2d(ngf * 2,     ngf, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf),
+            nn.ReLU(True),
+            # state size. (ngf) x 64 x 64
+            nn.ConvTranspose2d(    ngf,      nc, 4, 2, 1, bias=False),
+            nn.Tanh()
+            # state size. (nc) x 128 x 128
+        )
+
+    def forward(self, input):
+        if input.is_cuda and self.ngpu > 1:
+            output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
+        else:
+            output = self.main(input)
+        return output
 class CondGenerator(nn.Module):
     def __init__(self, ngpu):
         super(CondGenerator, self).__init__()
@@ -195,8 +269,11 @@ class CondGenerator(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf) x 32 x 32
             nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ndf * 2),
             nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(ndf*2, 1, 1, bias=False),
+            nn.Flatten()
+            #nn.BatchNorm2d(ndf * 2),
+            #nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*2) x 16 x 16
             #nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
             #nn.BatchNorm2d(ndf * 4),
@@ -240,15 +317,99 @@ class CondGenerator(nn.Module):
     def forward(self, input, noise):
         if input.is_cuda and self.ngpu > 1:
             encoded = nn.parallel.data_parallel(self.encoder, input, range(self.ngpu))
-            noisy_encoded = torch.cat((encoded,noise),0)
+            encoded = encoded.view(encoded.size(0), encoded.size(1), 1, 1)
+            noisy_encoded = torch.cat((encoded,noise),1)
             output = nn.parallel.data_parallel(self.decoded, noisy_encoded, range(self.ngpu))
         else:
             encoded = self.encoder(input)
-            noisy_encoded = torch.cat((encoded, noise),0)
+            encoded = encoded.view(encoded.size(0), encoded.size(1), 1, 1)
+            noisy_encoded = torch.cat((encoded, noise),1)
             output = self.decoder(noisy_encoded)
         return output
-if opt.conditional:
+
+
+class CondGeneratorHighres(nn.Module):
+    def __init__(self, ngpu):
+        super(CondGeneratorHighres, self).__init__()
+        self.ngpu = ngpu
+        self.encoder = nn.Sequential(
+            # input is (nc) x 128 x 128
+            nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf) x 64 x 64
+            nn.Conv2d(ndf, ndf, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf) x 32 x 32
+            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(ndf*2, 1, 1, bias=False),
+            #add flatten layer
+            nn.Flatten()
+            #nn.BatchNorm2d(ndf * 2),
+            #nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*2) x 16 x 16
+            #nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
+            #nn.BatchNorm2d(ndf * 4),
+            #nn.LeakyReLU(0.2, inplace=True),
+            ## state size. (ndf*4) x 8 x 8
+            #nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
+            #nn.BatchNorm2d(ndf * 8),
+            #nn.LeakyReLU(0.2, inplace=True),
+            ## state size. (ndf*8) x 4 x 4
+            #nn.Conv2d(ndf * 8, 1, (4,6), 1, 0, bias=False),
+            #nn.LeakyReLU(0.2, inplace=True)
+        )
+
+        self.decoder = nn.Sequential(
+            # input is Z, going into a convolution
+            nn.ConvTranspose2d(384+nz, ngf * 32, (4,6), 1, 0, bias=False),
+            nn.BatchNorm2d(ngf * 32),
+            nn.ReLU(True),
+            # state size. (ngf*16) x 4 x 6
+            nn.ConvTranspose2d(ngf * 32, ngf * 16, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 16),
+            nn.ReLU(True),
+            # state size. (ngf*8) x 8 x 12
+            nn.ConvTranspose2d(ngf * 16, ngf * 8, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 8),
+            nn.ReLU(True),
+            # state size. (ngf*4) x 16 x 24
+            nn.ConvTranspose2d(ngf * 8,     ngf*4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf*4),
+            nn.ReLU(True),
+            # state size. (ngf*2) x 32 x 48
+            nn.ConvTranspose2d(ngf * 4,     ngf*2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf*2),
+            nn.ReLU(True),
+            # state size. (ngf) x 64 x 96
+            nn.ConvTranspose2d(ngf * 2,     ngf, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf),
+            nn.ReLU(True),
+            # state size. (ngf) x 64 x 96
+            nn.ConvTranspose2d(    ngf,      nc, 4, 2, 1, bias=False),
+            nn.Tanh()
+            # state size. (nc) x 128 x 192
+        )
+
+    def forward(self, input, noise):
+        if input.is_cuda and self.ngpu > 1:
+            encoded = nn.parallel.data_parallel(self.encoder, input, range(self.ngpu))
+            encoded = encoded.view(encoded.size(0),encoded.size(1),1,1)
+            noisy_encoded = torch.cat((encoded,noise),1)
+            output = nn.parallel.data_parallel(self.decoded, noisy_encoded, range(self.ngpu))
+        else:
+            encoded = self.encoder(input)
+            encoded = encoded.view(encoded.size(0), encoded.size(1),1,1)
+            noisy_encoded = torch.cat((encoded, noise),1)
+            output = self.decoder(noisy_encoded)
+        return output
+#add condition for highres
+if opt.conditional and opt.highres:
+    netG = CondGeneratorHighres(ngpu).to(device)
+elif opt.conditional and not opt.highres:
     netG = CondGenerator(ngpu).to(device)
+elif opt.highres:
+    netG = GeneratorHighres(ngpu).to(device)
 else:
     netG = Generator(ngpu).to(device)
 netG.apply(weights_init)
@@ -257,6 +418,7 @@ if opt.netG != '':
 print(netG)
 
 
+print("Finished setting generators",time.time()-main_time)
 class Discriminator(nn.Module):
     def __init__(self, ngpu):
         super(Discriminator, self).__init__()
@@ -294,14 +456,56 @@ class Discriminator(nn.Module):
         return output.view(-1, 1).squeeze(1)
 
 
-netD = Discriminator(ngpu).to(device)
+class DiscriminatorHighres(nn.Module):
+    def __init__(self, ngpu):
+        super(DiscriminatorHighres, self).__init__()
+        self.ngpu = ngpu
+        self.main = nn.Sequential(
+            # input is (nc) x 128 x 192
+            nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf) x 64 x 96
+            nn.Conv2d(ndf, ndf, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf) x 32 x 48
+            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 2),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*2) x 16 x 24
+            nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 4),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*4) x 8 x 12
+            nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 8),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*8) x 4 x 6
+            nn.Conv2d(ndf * 8, ndf * 16, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 16),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*8) x 4 x 6
+            nn.Conv2d(ndf * 16, 1, (4,6), 1, 0, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, input):
+        if input.is_cuda and self.ngpu > 1:
+            output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
+        else:
+            output = self.main(input)
+
+        return output.view(-1, 1).squeeze(1)
+if opt.highres:
+    netD = DiscriminatorHighres(ngpu).to(device)
+else:
+    netD = Discriminator(ngpu).to(device)
 netD.apply(weights_init)
 if opt.netD != '':
     netD.load_state_dict(torch.load(opt.netD))
 print(netD)
 
 criterion = nn.BCELoss()
-
+# Fix a seed so that we get same results every time
 fixed_noise = torch.randn(opt.batchSize, nz, 1, 1, device=device)
 real_label = 1
 fake_label = 0
@@ -312,64 +516,134 @@ optimizerG = optim.Adam(netG.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
 
 if opt.dry_run:
     opt.niter = 1
-
-for epoch in range(opt.niter):
-    for i, data in enumerate(dataloader, 0):
-        ############################
-        # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
-        ###########################
-        # train with real
-        netD.zero_grad()
-        if opt.dataset == 'cosmo':
+if opt.conditional:
+    for epoch in range(opt.niter):
+        for i, (x,y) in enumerate(dataloader, 0):
+            ############################
+            # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
+            ###########################
+            # train with real
+            data = y
+            netD.zero_grad()
             real_cpu = data.to(device)
-        else:
-            real_cpu = data[0].to(device)
-        real_cpu = real_cpu.float()
-        batch_size = real_cpu.size(0)
-        label = torch.full((batch_size,), real_label,
-                           dtype=real_cpu.dtype, device=device)
-        output = netD(real_cpu)
-        errD_real = criterion(output, label)
-        errD_real.backward()
-        D_x = output.mean().item()
+            pred = x.to(device)
+            real_cpu = real_cpu.float()
+            pred = pred.float()
+            batch_size = real_cpu.size(0)
+            label = torch.full((batch_size,), real_label,
+                               dtype=real_cpu.dtype, device=device)
+            output = netD(real_cpu)
+            errD_real = criterion(output, label)
+            errD_real.backward()
+            D_x = output.mean().item()
 
-        # train with fake
-        noise = torch.randn(batch_size, nz, 1, 1, device=device)
-        fake = netG(noise)
-        label.fill_(fake_label)
-        output = netD(fake.detach())
-        errD_fake = criterion(output, label)
-        errD_fake.backward()
-        D_G_z1 = output.mean().item()
-        errD = errD_real + errD_fake
-        optimizerD.step()
+            # train with fake
+            noise = torch.randn(batch_size, nz, 1, 1, device=device)
+            fake = netG(pred,noise)
+            label.fill_(fake_label)
+            output = netD(fake.detach())
+            errD_fake = criterion(output, label)
+            errD_fake.backward()
+            D_G_z1 = output.mean().item()
+            errD = errD_real + errD_fake
+            optimizerD.step()
 
-        ############################
-        # (2) Update G network: maximize log(D(G(z)))
-        ###########################
-        netG.zero_grad()
-        label.fill_(real_label)  # fake labels are real for generator cost
-        output = netD(fake)
-        errG = criterion(output, label)
-        errG.backward()
-        D_G_z2 = output.mean().item()
-        optimizerG.step()
+            ############################
+            # (2) Update G network: maximize log(D(G(z)))
+            ###########################
+            netG.zero_grad()
+            label.fill_(real_label)  # fake labels are real for generator cost
+            output = netD(fake)
+            errG = criterion(output, label)
+            errG.backward()
+            D_G_z2 = output.mean().item()
+            optimizerG.step()
 
-        print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f D(x): %.4f D(G(z)): %.4f / %.4f'
-              % (epoch, opt.niter, i, len(dataloader),
-                 errD.item(), errG.item(), D_x, D_G_z1, D_G_z2))
-        if i % 100 == 0:
-            #vutils.save_image(real_cpu,
-            #        '%s/real_samples.png' % opt.outf,
-            #        normalize=True)
-            plot_images(real_cpu.cpu().numpy(), f"{opt.outf}/real_samples.png")
-            fake = netG(fixed_noise)
-            #vutils.save_image(fake.detach(),
-            #        '%s/fake_samples_epoch_%03d.png' % (opt.outf, epoch),
-            #        normalize=True)
-            plot_images(fake.detach().cpu().numpy(), f"{opt.outf}/fake_samples_epoch_{epoch}.png")
-        if opt.dry_run:
-            break
-    # do checkpointing
-    torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (opt.outf, epoch))
-    torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (opt.outf, epoch))
+            print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f D(x): %.4f D(G(z)): %.4f / %.4f'
+                  % (epoch, opt.niter, i, len(dataloader),
+                     errD.item(), errG.item(), D_x, D_G_z1, D_G_z2))
+            writer.add_scalar("Generator loss", errG.item(), epoch)
+            writer.add_scalar("Discriminator loss", errD.item(), epoch)
+            if i % 100 == 0:
+                #vutils.save_image(real_cpu,
+                #        '%s/real_samples.png' % opt.outf,
+                #        normalize=True)
+                plot_images(real_cpu.cpu().numpy(), f"{opt.outf}/real_samples_epoch_{epoch}.png")
+                fake = netG(pred, fixed_noise)
+                #vutils.save_image(fake.detach(),
+                #        '%s/fake_samples_epoch_%03d.png' % (opt.outf, epoch),
+                #        normalize=True)
+                plot_images(fake.detach().cpu().numpy(), f"{opt.outf}/fake_samples_epoch_{epoch}.png")
+                plot_image_single_conditional(fake[0][0].detach().cpu().numpy(), real_cpu[0][0].cpu().numpy(), f"{opt.outf}/image_pair_{epoch}.png")
+            if opt.dry_run:
+                break
+        # do checkpointing
+        torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (opt.outf, epoch))
+        torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (opt.outf, epoch))
+        writer.flush()
+else:
+    for epoch in range(opt.niter):
+        for i, data in enumerate(dataloader, 0):
+            ############################
+            # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
+            ###########################
+            # train with real
+            netD.zero_grad()
+            if opt.dataset == 'cosmo':
+                real_cpu = data.to(device)
+            else:
+                real_cpu = data[0].to(device)
+            real_cpu = real_cpu.float()
+            batch_size = real_cpu.size(0)
+            label = torch.full((batch_size,), real_label,
+                               dtype=real_cpu.dtype, device=device)
+            output = netD(real_cpu)
+            errD_real = criterion(output, label)
+            errD_real.backward()
+            D_x = output.mean().item()
+
+            # train with fake
+            noise = torch.randn(batch_size, nz, 1, 1, device=device)
+            fake = netG(noise)
+            label.fill_(fake_label)
+            output = netD(fake.detach())
+            errD_fake = criterion(output, label)
+            errD_fake.backward()
+            D_G_z1 = output.mean().item()
+            errD = errD_real + errD_fake
+            optimizerD.step()
+
+            ############################
+            # (2) Update G network: maximize log(D(G(z)))
+            ###########################
+            netG.zero_grad()
+            label.fill_(real_label)  # fake labels are real for generator cost
+            output = netD(fake)
+            errG = criterion(output, label)
+            errG.backward()
+            D_G_z2 = output.mean().item()
+            optimizerG.step()
+
+            print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f D(x): %.4f D(G(z)): %.4f / %.4f'
+                  % (epoch, opt.niter, i, len(dataloader),
+                     errD.item(), errG.item(), D_x, D_G_z1, D_G_z2))
+            writer.add_scalar("Generator loss", errG.item(), epoch)
+            writer.add_scalar("Discriminator loss", errD.item(), epoch)
+            if i % 100 == 0:
+                #vutils.save_image(real_cpu,
+                #        '%s/real_samples.png' % opt.outf,
+                #        normalize=True)
+                plot_images(real_cpu.cpu().numpy(), f"{opt.outf}/real_samples_epoch_{epoch}.png")
+                fake = netG(fixed_noise)
+                #vutils.save_image(fake.detach(),
+                #        '%s/fake_samples_epoch_%03d.png' % (opt.outf, epoch),
+                #        normalize=True)
+                plot_images(fake.detach().cpu().numpy(), f"{opt.outf}/fake_samples_epoch_{epoch}.png")
+                plot_image_single_unconditional(fake[0][0].detach().cpu().numpy(), f"{opt.outf}/fake_image_epoch_{epoch}.png")
+            if opt.dry_run:
+                break
+        # do checkpointing
+        torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (opt.outf, epoch))
+        torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (opt.outf, epoch))
+        writer.flush()
+writer.close()
