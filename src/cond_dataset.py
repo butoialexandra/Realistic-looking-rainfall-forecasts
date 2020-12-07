@@ -16,6 +16,7 @@ import pyproj
 
 from sklearn.model_selection import train_test_split
 from util import pad
+import matplotlib.pyplot as plt
 
 
 base_dir = "/mnt/ds3lab-scratch/bhendj/data"
@@ -126,7 +127,7 @@ class Dataset(torch.utils.data.Dataset):
             raise Exception(f"Invalid leadtime {leadtime} for target_time {target_time} and reftime {reftime}")
 
         t = time.time()
-        pred_points = self.cosmo.sel(reftime=reftime).isel(leadtime=leadtime, member=0)  # TODO: member!
+        pred_points = self.cosmo.sel(reftime=reftime).isel(leadtime=leadtime)  # TODO: member!
         # print(f"[Time] Select ensemble points {time.time() - t}")
         # print(f"[INFO] Reftime {reftime} Leadtime {leadtime}")
 
@@ -142,8 +143,7 @@ class Dataset(torch.utils.data.Dataset):
         # In other words, the input is 23,876 points, and the reference is 125,965 points
 
         t = time.time()
-        # TODO: use actual sizes, not cropped images
-        prec_pred = pred_points['PREC'].values
+        prec_pred = np.mean(pred_points['PREC'].values, axis=0)
         prec_real = real_point['RR'].values
         # print(f"[Time] Get values {time.time() - t}")
 

@@ -90,17 +90,17 @@ def plot_image(data, n_row, batches_done, generator, device):
     for i in range(batch_size):
         ax = fig.add_subplot(n_row, 3, i * 3 + 1)
         ax.set_title('Forecast')
-        plt.imshow(y_pred[i, :, :, :].squeeze().detach().cpu())
+        plt.pcolormesh(y_pred[i, :, :, :].squeeze().detach().cpu(), vmin=0, vmax=1)
         plt.colorbar(orientation='vertical')
 
         ax = fig.add_subplot(n_row, 3, i * 3 + 2)
         ax.set_title('Observation')
-        plt.imshow(y_real[i, :, :, :].squeeze().detach().cpu())
+        plt.pcolormesh(y_real[i, :, :, :].squeeze().detach().cpu(), vmin=0, vmax=1)
         plt.colorbar(orientation='vertical')
 
         ax = fig.add_subplot(n_row, 3, i * 3 + 3)
         ax.set_title('Output')
-        plt.imshow(gen_imgs[i, :, :, :].squeeze().detach().cpu())
+        plt.pcolormesh(gen_imgs[i, :, :, :].squeeze().detach().cpu(), vmin=0, vmax=1)
         plt.colorbar(orientation='vertical')
     plt.savefig("images/%d.png" % batches_done)
 
@@ -111,5 +111,7 @@ def pad(x, y):
     pred = np.zeros((128, 192))
     pred[:-1, :-4] = x
     obs = y[:256, :384]
+    pred = np.clip(pred, 0, 50) / 50
+    obs = np.clip(obs, 0, 50) / 50
 
     return pred, obs
