@@ -4,6 +4,7 @@ import numpy as np
 from torch.nn import init
 from torch.autograd import Variable
 from verification import crps, log_spectral_distance
+import random
 
 def init_weights(m):
     classname = m.__class__.__name__
@@ -13,57 +14,93 @@ def init_weights(m):
         init.normal_(m.weight.data, 1.0, 0.02)
         init.constant_(m.bias.data, 0.0)
 
-def sample_image(training_data, n_row, batches_done, generator, device):
-    n_row = 1 # FIXME
-    # Sample noise
-    # z = Variable(FloatTensor(np.random.normal(0, 1, (n_row, opt.latent_dim))))
-    # Get labels ranging from 0 to n_classes for n rows
-    y_pred, y_real = training_data.get_x_y_by_id(training_data.selected_indices[0])  # TODO: fix first date from 201805
-    y_pred = torch.tensor(y_pred, device=device).repeat(n_row, 1, 1)
-    y_real = torch.tensor(y_real, device=device).repeat(n_row, 1, 1)
-    y_pred = y_pred.unsqueeze(1)
-    y_real = y_real.unsqueeze(1)
+def sample_image(data, n_row, batches_done, generator, device):
+    # generate small batch of images
+    shuffled_indices = random.sample(data.selected_indices, 4)
+    y_pred, y_real = data.get_x_y_by_id(shuffled_indices[0])
+    y_pred = torch.tensor(y_pred, device=device).repeat(1, 1, 1).unsqueeze(1)
+    y_real = torch.tensor(y_real, device=device).repeat(1, 1, 1).unsqueeze(1)
+    batch_size = min(n_row, len(shuffled_indices))
+    for i in range(1, batch_size):
+        p, r = data.get_x_y_by_id(shuffled_indices[i])
+        y_pred = torch.cat([
+            torch.tensor(p, device=device).repeat(1, 1, 1).unsqueeze(1),
+            y_pred
+        ], 0)
+        y_real = torch.cat([
+            torch.tensor(r, device=device).repeat(1, 1, 1).unsqueeze(1),
+            y_real
+        ], 0)
+
+    # generate images
     FloatTensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
-    noise = Variable(torch.tensor(np.random.normal(0, 1, (1, 8, 32, 32))).type(FloatTensor))
+    noise = Variable(torch.tensor(np.random.normal(0, 1, (n_row, 8, 32, 32))).type(FloatTensor))
     gen_imgs = generator(y_pred, noise)
 
-    fig = plt.figure(figsize=(6, 3.2))
-    ax = fig.add_subplot(121)
-    ax.set_title('Output')
-    plt.imshow(gen_imgs.squeeze().detach().cpu())
+    # plot figure
+    fig = plt.figure(figsize=(9, 3.2*n_row))
+    for i in range(batch_size):
+        ax = fig.add_subplot(n_row, 3, i * 3 + 1)
+        ax.set_title('Forecast')
+        plt.imshow(y_pred[i, :, :, :].squeeze().detach().cpu())
+        plt.colorbar(orientation='vertical')
 
-    ax = fig.add_subplot(122)
-    ax.set_title('Observation')
-    plt.imshow(y_real.squeeze().detach().cpu())
-    plt.colorbar(orientation='horizontal')
+        ax = fig.add_subplot(n_row, 3, i*3+2)
+        ax.set_title('Observation')
+        plt.imshow(y_real[i, :, :, :].squeeze().detach().cpu())
+        plt.colorbar(orientation='vertical')
+
+        ax = fig.add_subplot(n_row, 3, i*3+3)
+        ax.set_title('Output')
+        plt.imshow(gen_imgs[i, :, :, :].squeeze().detach().cpu())
+        plt.colorbar(orientation='vertical')
     plt.savefig("images/%d.png" % batches_done)
 
-    gen_imgs = gen_imgs.squeeze(1).squeeze(0).detach().cpu().numpy()
-    y_real = y_real.squeeze(1).squeeze(0).detach().cpu().numpy()
-    # crps_score = crps(gen_imgs, y_real)
-    lsd_score = log_spectral_distance(gen_imgs, y_real)
+    # gen_imgs = gen_imgs.squeeze(1).squeeze(0).detach().cpu().numpy()
+    # y_real = y_real.squeeze(1).squeeze(0).detach().cpu().numpy()
+    # # crps_score = crps(gen_imgs, y_real)
+    lsd_score = None
     return lsd_score
 
-def plot_image(training_data, generator, device):
-    n_row = 1  # FIXME
-    y_pred, y_real = training_data.get_x_y_by_id(training_data.selected_indices[0])  # TODO: fix first date from 201805
-    y_pred = torch.tensor(y_pred, device=device).repeat(n_row, 1, 1) / 10
-    y_real = torch.tensor(y_real, device=device).repeat(n_row, 1, 1) / 10
-    y_pred = y_pred.unsqueeze(1)
-    y_real = y_real.unsqueeze(1)
+def plot_image(data, n_row, generator, device):
+    # generate small batch of images
+    shuffled_indices = random.sample(data.selected_indices, 4)
+    y_pred, y_real = data.get_x_y_by_id(shuffled_indices[0])
+    y_pred = torch.tensor(y_pred, device=device).repeat(1, 1, 1).unsqueeze(1)
+    y_real = torch.tensor(y_real, device=device).repeat(1, 1, 1).unsqueeze(1)
+    batch_size = min(n_row, len(shuffled_indices))
+    for i in range(1, batch_size):
+        p, r = data.get_x_y_by_id(shuffled_indices[i])
+        y_pred = torch.cat([
+            torch.tensor(p, device=device).repeat(1, 1, 1).unsqueeze(1),
+            y_pred
+        ], 0)
+        y_real = torch.cat([
+            torch.tensor(r, device=device).repeat(1, 1, 1).unsqueeze(1),
+            y_real
+        ], 0)
+
+    # generate images
     FloatTensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
-    noise = Variable(torch.tensor(np.random.normal(0, 1, (1, 8, 32, 32))).type(FloatTensor))
+    noise = Variable(torch.tensor(np.random.normal(0, 1, (n_row, 8, 32, 32))).type(FloatTensor))
     gen_imgs = generator(y_pred, noise)
 
-    fig = plt.figure(figsize=(6, 3.2))
-    ax = fig.add_subplot(121)
-    ax.set_title('Output')
-    plt.imshow(gen_imgs.squeeze().detach().cpu())
-    plt.colorbar()
+    # plot figure
+    fig = plt.figure(figsize=(9, 3.2 * n_row))
+    for i in range(batch_size):
+        ax = fig.add_subplot(n_row, 3, i * 3 + 1)
+        ax.set_title('Forecast')
+        plt.imshow(y_pred[i, :, :, :].squeeze().detach().cpu())
+        plt.colorbar(orientation='vertical')
 
-    ax = fig.add_subplot(122)
-    ax.set_title('Observation')
-    plt.imshow(y_real.squeeze().detach().cpu())
-    plt.colorbar()
+        ax = fig.add_subplot(n_row, 3, i * 3 + 2)
+        ax.set_title('Observation')
+        plt.imshow(y_real[i, :, :, :].squeeze().detach().cpu())
+        plt.colorbar(orientation='vertical')
+
+        ax = fig.add_subplot(n_row, 3, i * 3 + 3)
+        ax.set_title('Output')
+        plt.imshow(gen_imgs[i, :, :, :].squeeze().detach().cpu())
+        plt.colorbar(orientation='vertical')
 
     return fig

@@ -146,8 +146,8 @@ if __name__ == "__main__":
 
             batches_done = epoch * len(training_generator) + i
             if batches_done % opt.sample_interval == 0:
-                lsd = sample_image(training_data, n_row=10, batches_done=batches_done, generator=generator, device=device)
-                # writer.add_scalar('CRPS', crps, batches_done)
-                writer.add_scalar('Log spectral distance', lsd, batches_done)
-                writer.add_figure('Generated images', plot_image(training_data, generator, device),
+                lsd = sample_image(training_data, n_row=4, batches_done=batches_done, generator=generator, device=device)
+                # # writer.add_scalar('CRPS', crps, batches_done)
+                # writer.add_scalar('Log spectral distance', lsd, batches_done)
+                writer.add_figure('Generated images', plot_image(training_data, n_row=4, generator=generator, device=device),
                                   global_step=batches_done)
