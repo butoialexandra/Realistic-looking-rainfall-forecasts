@@ -198,9 +198,9 @@ class Generator(nn.Module):
     def __init__(self, in_channels=1, out_channels=1, norm=None, bias=True):
         super(Generator, self).__init__()
         self.enc = nn.Sequential(*[
-            EncoderBlock(in_channels, 62, stride=1, bias=bias, norm=norm, activation="relu"),
-            EncoderBlock(62, 124, stride=2, bias=bias, norm=norm, activation="relu"),
-            EncoderBlock(124, 248, stride=2, bias=bias, norm=norm, activation="relu")
+            EncoderBlock(in_channels, 62, stride=1, padding=1, bias=bias, norm=norm, activation="relu"),
+            EncoderBlock(62, 124, stride=2, bias=bias, padding=1, norm=norm, activation="relu"),
+            EncoderBlock(124, 248, stride=2, bias=bias, padding=1, norm=norm, activation="relu")
         ])
         modules = []
         for i in range(6):
@@ -208,7 +208,7 @@ class Generator(nn.Module):
         modules += [DecoderBlock(256, 128, kernel=3, stride=2, bias=bias, norm=norm, activation='relu'),
                     DecoderBlock(128, 64, kernel=3, stride=2, bias=bias, norm=norm, activation='relu'),
                     DecoderBlock(64, 32, kernel=3, stride=2, bias=bias, padding=0, norm=norm, activation='relu'),
-                    nn.Conv2d(32, out_channels, (3,3), padding=0, stride=1, bias=bias),
+                    nn.Conv2d(32, out_channels, (3,3), stride=1, bias=bias),
                     nn.Sigmoid()]
         self.dec = nn.Sequential(*modules)
 

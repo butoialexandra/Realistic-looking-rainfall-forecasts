@@ -11,7 +11,7 @@ from torch.autograd import Variable
 
 from cond_dataset import Dataset
 from src.modules import Generator, Discriminator
-from util import init_weights, sample_image, plot_image
+from util import init_weights, plot_image
 
 if __name__ == "__main__":
 
@@ -99,7 +99,7 @@ if __name__ == "__main__":
             optimizer_D.zero_grad()
 
             # Sample noise as generator input
-            noise = Variable(torch.tensor(np.random.normal(0, 1, (batch_size, 8, 32, 32))).type(FloatTensor))
+            noise = Variable(torch.tensor(np.random.normal(0, 1, (batch_size, 8, 32, 48))).type(FloatTensor))
 
             # Generate a batch of images
             gen_imgs = generator(pred_imgs, noise)
@@ -146,8 +146,8 @@ if __name__ == "__main__":
 
             batches_done = epoch * len(training_generator) + i
             if batches_done % opt.sample_interval == 0:
-                lsd = sample_image(training_data, n_row=4, batches_done=batches_done, generator=generator, device=device)
+                # sample_image(validation_data, n_row=4, batches_done=batches_done, generator=generator, device=device)
                 # # writer.add_scalar('CRPS', crps, batches_done)
                 # writer.add_scalar('Log spectral distance', lsd, batches_done)
-                writer.add_figure('Generated images', plot_image(training_data, n_row=4, generator=generator, device=device),
+                writer.add_figure('Generated images', plot_image(validation_data, n_row=4, batches_done=batches_done, generator=generator, device=device),
                                   global_step=batches_done)

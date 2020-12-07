@@ -15,6 +15,7 @@ import xarray as xr
 import pyproj
 
 from sklearn.model_selection import train_test_split
+from util import pad
 
 
 base_dir = "/mnt/ds3lab-scratch/bhendj/data"
@@ -74,10 +75,6 @@ class Dataset(torch.utils.data.Dataset):
         self.observations = load_observations()
         self.cosmo = load_predictions()
         self.top_left, self.bottom_right = self.compute_nearest_neighbors()
-        self.transform = transforms.Compose([
-            transforms.Normalize(mean=[0],
-                                 std=[1])
-        ])
     
     def __len__(self):
         return len(self.selected_indices)
@@ -146,8 +143,8 @@ class Dataset(torch.utils.data.Dataset):
 
         t = time.time()
         # TODO: use actual sizes, not cropped images
-        prec_pred = pred_points['PREC'].values[:,:127]
-        prec_real = real_point['RR'].values[:256,:256]
+        prec_pred = pred_points['PREC'].values
+        prec_real = real_point['RR'].values
         # print(f"[Time] Get values {time.time() - t}")
 
         t = time.time()
@@ -193,19 +190,15 @@ class Dataset(torch.utils.data.Dataset):
         return self
 
     def __getitem__(self, index):
-        t = time.time()
         x, y = self.get_x_y_by_id(self.selected_indices[index])
-        # print(f"[Time] Get X, Y total {(time.time() - t):.4f} s")
 
-        t = time.time()
-        x = torch.tensor(x, device=self.device)
-        y = torch.tensor(y, device=self.device)
-        x = x.unsqueeze(0)
-        y = y.unsqueeze(0)
-        x = self.transform(x)
-        y = self.transform(y)
+        pred, obs = pad(x, y)
+        pred = torch.tensor(pred, device=self.device)
+        obs = torch.tensor(obs, device=self.device)
+        pred = pred.unsqueeze(0)
+        obs = obs.unsqueeze(0)
         # print(f"[Time] Copy into tensors {(time.time() - t):.4f} s")
-        return x, y
+        return pred, obs
 
 
 def plotit():
