@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from dataset import *
-import utils
+from src.utils import *
 from generator import *
 from discriminator import *
 

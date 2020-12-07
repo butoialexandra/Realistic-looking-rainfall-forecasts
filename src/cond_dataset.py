@@ -168,7 +168,7 @@ class Dataset(torch.utils.data.Dataset):
             image_ids += val
         return image_ids
     
-    def train_test_split_ids(self, how='random', test_size=0.1):
+    def train_test_split_ids(self, how='random', test_size=0.25):
         ids = self.get_image_ids()
         if how == 'random':
             train_ids, test_ids = train_test_split(ids, test_size=test_size)

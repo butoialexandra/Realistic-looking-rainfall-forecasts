@@ -2,7 +2,9 @@
 import xarray as xr
 import pyproj
 import torch
-
+from datetime import datetime
+import numpy as np
+from dateutil.relativedelta import relativedelta
 import glob
 from os.path import join
 import matplotlib.pyplot as plt
@@ -154,12 +156,12 @@ def train_test_split(images):
     pass
 
 #Function for standardizing images
-def standardize_images_cliiping(images):
+def standardize_images_clipping(images):
     """
     Scales values and clips images to lie between 0 and 1
     """
     images /= 10.0
-    images = np.clp(images, a_min=0.0, a_max=0.0)
+    images = np.clip(images, a_min=0.0, a_max=0.0)
     return images
 
 # Weight initialization

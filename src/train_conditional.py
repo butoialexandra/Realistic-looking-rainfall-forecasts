@@ -9,8 +9,8 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch.autograd import Variable
 
-from dataset import Dataset
-from modules import Generator, Discriminator
+from cond_dataset import Dataset
+from src.modules import Generator, Discriminator
 from util import init_weights, sample_image, plot_image
 
 if __name__ == "__main__":

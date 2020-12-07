@@ -1,15 +1,39 @@
 """
 Importing header files
 """
+from train import *
+from src.modules import ResidualLayer, DecoderBlock, EncoderBlock
 import torch.nn as nn
-
-import train
 
 ngpu = train.ngpu
 nz = train.nz
 ngf = train.ngf
 ndf = train.ndf
 
+class GeneratorRes(nn.Module):
+    def __init__(self, in_channels=1, out_channels=1, norm=None, bias=True):
+        super(GeneratorRes, self).__init__()
+        self.enc = nn.Sequential(*[
+            EncoderBlock(in_channels, 62, stride=1, bias=bias, norm=norm, activation="relu"),
+            EncoderBlock(62, 124, stride=2, bias=bias, norm=norm, activation="relu"),
+            EncoderBlock(124, 248, stride=2, bias=bias, norm=norm, activation="relu")
+        ])
+        modules = []
+        for i in range(6):
+            modules += [ResidualLayer(256, activation="relu")]
+        modules += [DecoderBlock(256, 128, kernel=3, stride=2, bias=bias, norm=norm, activation='relu'),
+                    DecoderBlock(128, 64, kernel=3, stride=2, bias=bias, norm=norm, activation='relu'),
+                    DecoderBlock(64, 32, kernel=3, stride=2, bias=bias, padding=0, norm=norm,
+                                 activation='relu'),
+                    nn.Conv2d(32, out_channels, (3, 3), padding=0, stride=1, bias=bias),
+                    nn.Sigmoid()]
+        self.dec = nn.Sequential(*modules)
+
+    def forward(self, x, noise):
+        e = self.enc(x)
+        c = torch.cat([e, noise], 1)
+        d = self.dec(c)
+        return d
 
 class Generator(nn.Module):
     """
@@ -148,7 +172,7 @@ class CondGenerator(nn.Module):
         #Encoder
         self.encoder = nn.Sequential(
             # input is (nc) x 128 x 192
-            nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
+            *[nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf) x 64 x 96
             nn.Conv2d(ndf, ndf, 4, 2, 1, biasFalse),                                                                                                                                              [336/652]
@@ -158,8 +182,7 @@ class CondGenerator(nn.Module):
             # state size. (ndf*2) x 16 x 24
             nn.LeakyReLU(0.2, inplace=True),
             nn.Conv2d(ndf*2, 1, 1, bias=False),
-            nn.Flatten()
-
+            nn.Flatten()]
         )
         #Decoder
         self.decoder = nn.Sequential(
@@ -299,8 +322,6 @@ class CondGeneratorHighres(nn.Module):
             #Decoder
             output = self.decoder(noisy_encoded)
         return output
-
-
 
 
 

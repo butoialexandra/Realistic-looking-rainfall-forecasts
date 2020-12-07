@@ -162,7 +162,6 @@ class DecoderBlock(nn.Module):
             x = self.activation(x)
         return x
 
-
 class Discriminator(nn.Module):
     def __init__(self, in_channels=1, out_channels=1, bias = False, norm = "spectral"):
         super(Discriminator, self).__init__()
