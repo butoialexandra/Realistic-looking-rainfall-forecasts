@@ -22,14 +22,14 @@ if __name__ == "__main__":
     parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
     parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
     parser.add_argument("--sample_interval", type=int, default=5, help="interval between image sampling")
-    parser.add_argument("--n_critic", type=int, default=5, help="number of training steps for discriminator per iter")
+    parser.add_argument("--n_critic", type=int, default=1, help="number of training steps for discriminator per iter")
     parser.add_argument("--clip_value", type=float, default=1, help="lower and upper clip value for disc. weights")
     parser.add_argument("--device", type=int, default=0, help="the ID of the gpu to run on")
     opt = parser.parse_args()
     print(opt)
 
-    os.makedirs("images", exist_ok=True)
-    writer = SummaryWriter('runs/{}'.format(datetime.datetime.now()))
+    os.makedirs("../images", exist_ok=True)
+    writer = SummaryWriter('../runs/{}'.format(datetime.datetime.now()))
 
     if torch.cuda.is_available():
         cuda = True
@@ -47,8 +47,8 @@ if __name__ == "__main__":
     discriminator = Discriminator()
 
     # Initialize xavier
-    generator.apply(init_weights)
-    discriminator.apply(init_weights)
+    # generator.apply(init_weights)
+    # discriminator.apply(init_weights)
 
     if cuda:
         generator.cuda()

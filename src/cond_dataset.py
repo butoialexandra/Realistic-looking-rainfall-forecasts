@@ -127,7 +127,7 @@ class Dataset(torch.utils.data.Dataset):
             raise Exception(f"Invalid leadtime {leadtime} for target_time {target_time} and reftime {reftime}")
 
         t = time.time()
-        pred_points = self.cosmo.sel(reftime=reftime).isel(leadtime=leadtime)  # TODO: member!
+        pred_points = self.cosmo.sel(reftime=reftime).isel(leadtime=leadtime, member=0)  # TODO: member!
         # print(f"[Time] Select ensemble points {time.time() - t}")
         # print(f"[INFO] Reftime {reftime} Leadtime {leadtime}")
 
@@ -143,7 +143,7 @@ class Dataset(torch.utils.data.Dataset):
         # In other words, the input is 23,876 points, and the reference is 125,965 points
 
         t = time.time()
-        prec_pred = np.mean(pred_points['PREC'].values, axis=0)
+        prec_pred = pred_points['PREC'].values
         prec_real = real_point['RR'].values
         # print(f"[Time] Get values {time.time() - t}")
 
@@ -165,7 +165,7 @@ class Dataset(torch.utils.data.Dataset):
             image_ids += val
         return image_ids
     
-    def train_test_split_ids(self, how='random', test_size=0.25):
+    def train_test_split_ids(self, how='random', test_size=0.1):
         ids = self.get_image_ids()
         if how == 'random':
             train_ids, test_ids = train_test_split(ids, test_size=test_size)
