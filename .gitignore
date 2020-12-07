@@ -6,7 +6,7 @@ combiprecip_201805.nc
 .DS_Store
 runs/*
 images/*
-
+start.sh
 
 ########################################
 # Byte-compiled / optimized / DLL files
