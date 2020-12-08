@@ -191,8 +191,8 @@ class Discriminator(nn.Module):
         d11 = self.disc10(d10)
         d12 = self.pool(d11)
         d13 = d12.squeeze(3).squeeze(2)
-        final = nn.Sigmoid()(d13)
-        return final
+        # final = nn.Sigmoid()(d13)
+        return d13
 
 class Generator(nn.Module):
     def __init__(self, in_channels=1, out_channels=1, norm=None, bias=True):

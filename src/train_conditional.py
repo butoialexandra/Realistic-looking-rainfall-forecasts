@@ -8,10 +8,33 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch.autograd import Variable
+import torch.autograd as autograd
 
 from cond_dataset import Dataset
 from src.modules import Generator, Discriminator
 from util import init_weights, plot_image
+
+def calc_gradient_penalty(discriminator, real_data, fake_data, pred_data, batch_size, use_cuda, gpu, lmbda):
+    #print real_data.size()
+    alpha = torch.rand(batch_size, 1, 1, 1)
+    alpha = alpha.expand_as(real_data)
+    alpha = alpha.cuda(gpu) if use_cuda else alpha
+
+    interpolates = alpha * real_data + ((1 - alpha) * fake_data)
+
+    if use_cuda:
+        interpolates = interpolates.cuda(gpu)
+    interpolates = autograd.Variable(interpolates, requires_grad=True)
+
+    disc_interpolates = discriminator(interpolates, pred_data)
+
+    gradients = autograd.grad(outputs=disc_interpolates, inputs=interpolates,
+                              grad_outputs=torch.ones(disc_interpolates.size()).cuda(gpu) if use_cuda else torch.ones(
+                                  disc_interpolates.size()),
+                              create_graph=True, retain_graph=True, only_inputs=True)[0]
+
+    gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * lmbda
+    return gradient_penalty
 
 if __name__ == "__main__":
 
@@ -22,14 +45,15 @@ if __name__ == "__main__":
     parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
     parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
     parser.add_argument("--sample_interval", type=int, default=5, help="interval between image sampling")
-    parser.add_argument("--n_critic", type=int, default=1, help="number of training steps for discriminator per iter")
-    parser.add_argument("--clip_value", type=float, default=1, help="lower and upper clip value for disc. weights")
+    parser.add_argument("--n_critic", type=int, default=5, help="number of training steps for discriminator per iter")
+    parser.add_argument("--clip_value", type=float, default=0.1, help="lower and upper clip value for disc. weights")
     parser.add_argument("--device", type=int, default=0, help="the ID of the gpu to run on")
     opt = parser.parse_args()
     print(opt)
 
     os.makedirs("../images", exist_ok=True)
-    writer = SummaryWriter('../runs/{}'.format(datetime.datetime.now()))
+    out_dir = '../runs/{}'.format(datetime.datetime.now())
+    writer = SummaryWriter(out_dir)
 
     if torch.cuda.is_available():
         cuda = True
@@ -47,8 +71,8 @@ if __name__ == "__main__":
     discriminator = Discriminator()
 
     # Initialize xavier
-    # generator.apply(init_weights)
-    # discriminator.apply(init_weights)
+    generator.apply(init_weights)
+    discriminator.apply(init_weights)
 
     if cuda:
         generator.cuda()
@@ -58,7 +82,7 @@ if __name__ == "__main__":
     training_params = {"batch_size": opt.batch_size, "shuffle": True, "num_workers": 0}
     training_data = Dataset(device=device)
     train_idx, test_idx = training_data.train_test_split_ids(how='seq')
-    training_data.select_indices(train_idx, shuffle=False)  # TODO: this might cause problems!
+    training_data.select_indices(train_idx, shuffle=True)  # TODO: this might cause problems!
     training_generator = torch.utils.data.DataLoader(training_data, **training_params)
 
     validation_params = {"batch_size": opt.batch_size, "shuffle": False, "num_workers": 0}
@@ -95,6 +119,8 @@ if __name__ == "__main__":
             # ---------------------
             #  Train Discriminator
             # ---------------------
+            for p in discriminator.parameters():  # reset requires_grad
+                p.requires_grad = True
 
             optimizer_D.zero_grad()
 
@@ -105,14 +131,16 @@ if __name__ == "__main__":
             gen_imgs = generator(pred_imgs, noise)
 
             # Adversarial loss
+            grad_penalty = calc_gradient_penalty(discriminator, real_imgs.data, gen_imgs.data, pred_imgs, batch_size, cuda, opt.device, 10)
             d_loss = -torch.mean(discriminator(real_imgs, pred_imgs)) + torch.mean(discriminator(gen_imgs, pred_imgs))
 
             d_loss.backward()
+            grad_penalty.backward()
             optimizer_D.step()
 
-            # Clip weights of discriminator
-            for p in discriminator.parameters():
-                p.data.clamp_(-opt.clip_value, opt.clip_value)
+            # # Clip weights of discriminator
+            # for p in discriminator.parameters():
+            #     p.data.clamp_(-opt.clip_value, opt.clip_value)
 
                 # Adversarial ground truths
             valid = Variable(FloatTensor(batch_size, 1).fill_(1.0), requires_grad=False)
@@ -126,6 +154,8 @@ if __name__ == "__main__":
                 # -----------------
                 #  Train Generator
                 # -----------------
+                for p in discriminator.parameters():
+                    p.requires_grad = False
                 optimizer_G.zero_grad()
 
                 # Generate a batch of images
@@ -151,3 +181,6 @@ if __name__ == "__main__":
                 # writer.add_scalar('Log spectral distance', lsd, batches_done)
                 writer.add_figure('Generated images', plot_image(validation_data, n_row=4, batches_done=batches_done, generator=generator, device=device),
                                   global_step=batches_done)
+
+        torch.save(generator.state_dict(), '%s/generator_epoch_%d.pth' % (out_dir, epoch))
+        torch.save(discriminator.state_dict(), '%s/discriminator_epoch_%d.pth' % (out_dir, epoch))
