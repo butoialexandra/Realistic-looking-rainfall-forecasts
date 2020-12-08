@@ -84,7 +84,7 @@ def plot_image(data, n_row, batches_done, generator, device):
     FloatTensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
     noise = Variable(torch.tensor(np.random.normal(0, 1, (n_row, 8, 32, 48))).type(FloatTensor))
     y_pred, y_real = Variable(y_pred.type(FloatTensor)), Variable(y_real.type(FloatTensor))
-    gen_imgs = generator(y_pred, noise)
+    gen_imgs = generator(y_pred)
 
     # plot figure
     fig = plt.figure(figsize=(9, 3.2 * n_row))

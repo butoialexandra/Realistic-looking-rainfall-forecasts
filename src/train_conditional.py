@@ -11,7 +11,7 @@ from torch.autograd import Variable
 import torch.autograd as autograd
 
 from cond_dataset import Dataset
-from src.modules import Generator, Discriminator
+from src.modules import Generator, Discriminator, ESRGAN
 from util import init_weights, plot_image
 
 def calc_gradient_penalty(discriminator, real_data, fake_data, pred_data, batch_size, use_cuda, gpu, lmbda):
@@ -40,7 +40,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--n_epochs", type=int, default=50, help="number of epochs of training")
-    parser.add_argument("--batch_size", type=int, default=8, help="size of the batches")
+    parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
     parser.add_argument("--lr", type=float, default=0.002, help="adam: learning rate")
     parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
     parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
@@ -67,7 +67,7 @@ if __name__ == "__main__":
     adversarial_loss = torch.nn.BCELoss()
 
     # Initialize generator and discriminator
-    generator = Generator()
+    generator = ESRGAN(1, 1)
     discriminator = Discriminator()
 
     # Initialize xavier
@@ -128,7 +128,7 @@ if __name__ == "__main__":
             noise = Variable(torch.tensor(np.random.normal(0, 1, (batch_size, 8, 32, 48))).type(FloatTensor))
 
             # Generate a batch of images
-            gen_imgs = generator(pred_imgs, noise)
+            gen_imgs = generator(pred_imgs)
 
             # Adversarial loss
             grad_penalty = calc_gradient_penalty(discriminator, real_imgs.data, gen_imgs.data, pred_imgs, batch_size, cuda, opt.device, 10)
@@ -159,7 +159,7 @@ if __name__ == "__main__":
                 optimizer_G.zero_grad()
 
                 # Generate a batch of images
-                gen_imgs = generator(pred_imgs, noise)
+                gen_imgs = generator(pred_imgs)
                 # Adversarial loss
                 g_loss = -torch.mean(discriminator(gen_imgs, pred_imgs))
 
