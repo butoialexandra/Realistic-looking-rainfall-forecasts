@@ -95,7 +95,7 @@ def load_predictions_from_cache(load_dir, verbose=True):
         predictions.append(torch.load(filename).numpy())
         if verbose:
             print(f"Loaded {filename}")
-    predictions = predictions.concatenate(predictions, axis=0)
+    predictions = np.concatenate(predictions, axis=0)
     return predictions
 
 
@@ -133,7 +133,7 @@ def plot_image(image, save_path):
     plt.savefig(save_path)
 
 #Tiling images
-def create_tiles(predictions, observations, highres=True, img_size):
+def create_tiles(predictions, observations, highres, img_size):
     """
 
     """
@@ -160,8 +160,8 @@ def standardize_images_clipping(images):
     """
     Scales values and clips images to lie between 0 and 1
     """
-    images /= 10.0
-    images = np.clip(images, a_min=0.0, a_max=0.0)
+    images = np.clip(images, a_min=0.0, a_max=20.0)
+    images /= 20.0
     return images
 
 # Weight initialization

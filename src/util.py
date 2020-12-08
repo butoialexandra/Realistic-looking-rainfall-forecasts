@@ -116,3 +116,28 @@ def pad(x, y):
     obs = np.clip(obs, 0, 20) / 20
 
     return pred, obs
+
+def plot_images(gen_imgs, real_imgs, pred_imgs, batches_done):
+    assert gen_imgs.shape[0] == real_imgs.shape[0]
+    assert real_imgs.shape[0] == pred_imgs.shape[0]
+    batch_size = real_imgs.shape[0] if real_imgs.shape[0] <4 else 4
+
+    fig = plt.figure(figsize=(9, 3.2 * batch_size))
+    for i in range(batch_size):
+        ax = fig.add_subplot(batch_size, 3, i * 3 + 1)
+        ax.set_title('Forecast')
+        plt.imshow(pred_imgs[i, :, :, :].squeeze().detach().cpu())
+        plt.colorbar(orientation='vertical')
+
+        ax = fig.add_subplot(batch_size, 3, i * 3 + 2)
+        ax.set_title('Observation')
+        plt.imshow(real_imgs[i, :, :, :].squeeze().detach().cpu())
+        plt.colorbar(orientation='vertical')
+
+        ax = fig.add_subplot(batch_size, 3, i * 3 + 3)
+        ax.set_title('Output')
+        plt.imshow(gen_imgs[i, :, :, :].squeeze().detach().cpu())
+        plt.colorbar(orientation='vertical')
+    plt.savefig("images/%d.png" % batches_done)
+
+    return fig

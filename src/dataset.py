@@ -16,6 +16,7 @@ from dateutil.relativedelta import relativedelta
 
 from tqdm.auto import tqdm
 import numpy as np
+import matplotlib.pyplot as plt
 import xarray as xr
 import pyproj
 
@@ -111,10 +112,10 @@ class ConditionalDataset(torch.utils.data.Dataset):
         """
 
         if self.highres:
-            self.observed_images = np.ones((appended_obs_x_highres, appended_obs_y_highres))*0.1
+            self.observed_images = np.zeros((appended_obs_x_highres, appended_obs_y_highres))
         else:
-            self.observed_images = np.ones((appended_obs_x_lowres, appended_obs_y_lowres))*0.1
-        self.observed_images = utils.load_obs_from_cache(cluster_cache_dir, self.highres)
+            self.observed_images = np.zeros((appended_obs_x_lowres, appended_obs_y_lowres))
+        self.observed_images = utils.load_obs_from_cache(local_cache_dir, self.highres)
         self.observed_images = utils.standardize_images_clipping(self.observed_images)
         self.observed_images = np.expand_dims(self.observed_images, axis=1)
 
@@ -122,8 +123,8 @@ class ConditionalDataset(torch.utils.data.Dataset):
         """
         Load predictions
         """
-        self.predicted_images = np.ones((appended_pred_x, appended_pred_y))*0.1
-        self.predicted_images = utils.load_predictions_from_cache(cluster_cache_dir)
+        self.predicted_images = np.zeros((appended_pred_x, appended_pred_y))
+        self.predicted_images = utils.load_predictions_from_cache(local_cache_dir)
         self.predicted_images = utils.standardize_images_clipping(self.predicted_images)
         self.predicted_images = np.expand_dims(self.predicted_images, axis=1)
 

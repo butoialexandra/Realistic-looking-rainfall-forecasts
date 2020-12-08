@@ -259,7 +259,7 @@ class ResidualInResidualDenseBlock(nn.Module):
         super(ResidualInResidualDenseBlock, self).__init__()
         self.layer1 = ResidualDenseBlock(nf, gc)
         self.layer2 = ResidualDenseBlock(nf, gc)
-        self.layer3 = ResidualDenseBlock(nf, gc, )
+        self.layer3 = ResidualDenseBlock(nf, gc)
         self.res_scale = res_scale
 
     def forward(self, x):

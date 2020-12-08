@@ -7,6 +7,7 @@ combiprecip_201805.nc
 runs/*
 images/*
 start.sh
+preprocessed/*
 
 ########################################
 # Byte-compiled / optimized / DLL files
