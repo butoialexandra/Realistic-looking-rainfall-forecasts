@@ -135,6 +135,8 @@ nz = int(opt.nz)
 ngf = int(opt.ngf)
 ndf = int(opt.ndf)
 
+if opt.conditional:
+    nc_disc = 2*nc
 
 print("Finished setting parameters", time.time()-main_time)
 main_time = time.time()
@@ -424,8 +426,8 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         self.ngpu = ngpu
         self.main = nn.Sequential(
-            # input is (nc) x 128 x 192
-            nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
+            # input is (nc_disc) x 128 x 192
+            nn.Conv2d(nc_disc, ndf, 4, 2, 1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf) x 64 x 96
             nn.Conv2d(ndf, ndf, 4, 2, 1, bias=False),
@@ -461,8 +463,8 @@ class DiscriminatorHighres(nn.Module):
         super(DiscriminatorHighres, self).__init__()
         self.ngpu = ngpu
         self.main = nn.Sequential(
-            # input is (nc) x 128 x 192
-            nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
+            # input is (nc_disc) x 128 x 192
+            nn.Conv2d(nc_disc, ndf, 4, 2, 1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf) x 64 x 96
             nn.Conv2d(ndf, ndf, 4, 2, 1, bias=False),
@@ -495,6 +497,7 @@ class DiscriminatorHighres(nn.Module):
             output = self.main(input)
 
         return output.view(-1, 1).squeeze(1)
+
 if opt.highres:
     netD = DiscriminatorHighres(ngpu).to(device)
 else:
@@ -532,7 +535,15 @@ if opt.conditional:
             batch_size = real_cpu.size(0)
             label = torch.full((batch_size,), real_label,
                                dtype=real_cpu.dtype, device=device)
-            output = netD(real_cpu)
+            if opt.highres:
+                pred_double = torch.repeat_interleave(pred, 2, dim=2)
+                pred_double = torch.repeat_interleave(pred_double, 2, dim=3)
+                ip_disc = torch.cat((real_cpu, pred_double), 1)
+                ip_disc = ip_disc.float()
+            else:
+                ip_disc = torch.cat((real_cpu, pred), 1)
+                ip_disc = ip_disc.float()
+            output = netD(ip_disc)
             errD_real = criterion(output, label)
             errD_real.backward()
             D_x = output.mean().item()
@@ -541,7 +552,16 @@ if opt.conditional:
             noise = torch.randn(batch_size, nz, 1, 1, device=device)
             fake = netG(pred,noise)
             label.fill_(fake_label)
-            output = netD(fake.detach())
+            fake_nograd = fake.detach()
+            if opt.highres:
+                #pred_double = torch.repeat_interleave(pred, 2, dim=2)
+                #pred_double = torch.repeat_interleave(pred_double, 2, dim=3)
+                ip_disc_fake = torch.cat((fake_nograd, pred_double), 1)
+                ip_disc_fake = ip_disc_fake.float()
+            else:
+                ip_disc_fake = torch.cat((fake_nograd, pred), 1)
+                ip_disc_fake = ip_disc_fake.float()
+            output = netD(ip_disc_fake)
             errD_fake = criterion(output, label)
             errD_fake.backward()
             D_G_z1 = output.mean().item()
@@ -553,11 +573,20 @@ if opt.conditional:
             ###########################
             netG.zero_grad()
             label.fill_(real_label)  # fake labels are real for generator cost
-            output = netD(fake)
+            if opt.highres:
+                #pred_double = torch.repeat_interleave(pred, 2, dim=2)
+                #pred_double = torch.repeat_interleave(pred_double, 2, dim=3)
+                ip_gen = torch.cat((fake, pred_double), 1)
+                ip_gen = ip_gen.float()
+            else:
+                ip_gen = torch.stack((fake, pred), dim=1)
+                ip_gen = ip_gen.float()
+            output = netD(ip_gen)
             errG = criterion(output, label)
             errG.backward()
             D_G_z2 = output.mean().item()
-            optimizerG.step()
+            if epoch%2 == 0:
+                optimizerG.step()
 
             print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f D(x): %.4f D(G(z)): %.4f / %.4f'
                   % (epoch, opt.niter, i, len(dataloader),
@@ -569,6 +598,10 @@ if opt.conditional:
                 #        '%s/real_samples.png' % opt.outf,
                 #        normalize=True)
                 plot_images(real_cpu.cpu().numpy(), f"{opt.outf}/real_samples_epoch_{epoch}.png")
+                if opt.highres:
+                    plot_images(pred_double.cpu().numpy(), f"{opt.outf}/pred_samples_epoch_{epoch}.png")
+                else:
+                    plot_images(pred.cpu().numpy(), f"{opt.outf}/pred_samples_epoch_{epoch}.png")
                 fake = netG(pred, fixed_noise)
                 #vutils.save_image(fake.detach(),
                 #        '%s/fake_samples_epoch_%03d.png' % (opt.outf, epoch),

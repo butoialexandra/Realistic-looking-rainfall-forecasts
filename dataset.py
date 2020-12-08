@@ -73,24 +73,42 @@ def load_predictions_from_cache(load_dir, verbose=True):
     predictions = np.concatenate(predictions,axis=0) 
     return predictions
 
-def load_x_y_from_cache(load_dir, verbose=True):
+def load_x_y_from_cache(load_dir, test=False,verbose=True):
     predictions = []
     observations = []
     observations_hr = []
-    for filename in glob.glob(f"{load_dir}/predictions*.pt"):
-        predictions.append(torch.load(filename).numpy())
-        if verbose:
-            print(f"Loaded {filename}")
+    if test:
+        idx_set = [1,2]
+        for idx in idx_set:
+            filename = f"{load_dir}/predictions.{idx}.pt"
+            predictions.append(torch.load(filename).numpy())
+            if verbose:
+                print(f"Loaded {filename}")
+        for idx in idx_set:
+            filename = f"{load_dir}/observations.{idx}.pt"
+            observations.append(torch.load(filename).numpy())
+            if verbose:
+                print(f"Loaded {filename}")
+        for idx in idx_set:
+            filename = f"{load_dir}/observations_hr.{idx}.pt"
+            observations_hr.append(torch.load(filename).numpy())
+            if verbose:
+                print(f"Loaded {filename}")
+    else:
+        for filename in glob.glob(f"{load_dir}/predictions*.pt"):
+            predictions.append(torch.load(filename).numpy())
+            if verbose:
+                print(f"Loaded {filename}")
+        
+        for filename in glob.glob(f"{load_dir}/observations.*.pt"):
+            observations.append(torch.load(filename).numpy())
+            if verbose:
+                print(f"Loaded {filename}")
 
-    for filename in glob.glob(f"{load_dir}/observations.*.pt"):
-        observations.append(torch.load(filename).numpy())
-        if verbose:
-            print(f"Loaded {filename}")
-
-    for filename in glob.glob(f"{load_dir}/observations_hr.*.pt"):
-        observations_hr.append(torch.load(filename).numpy())
-        if verbose:
-            print(f"Loaded {filename}")
+        for filename in glob.glob(f"{load_dir}/observations_hr.*.pt"):
+            observations_hr.append(torch.load(filename).numpy())
+            if verbose:
+                print(f"Loaded {filename}")
 
     predictions = np.concatenate(predictions,axis=0)
     observations = np.concatenate(observations, axis=0)
@@ -99,10 +117,13 @@ def load_x_y_from_cache(load_dir, verbose=True):
 
 
 class UnconditionalDatasetObservations(torch.utils.data.Dataset):
-    def __init__(self, device='cpu', on_cluster=False):
+    def __init__(self, device='cpu', on_cluster=False, test=False):
         self.device = device
         load_dir = "/mnt/ds3lab-scratch/dslab2019/shghosh/preprocessed"
-        dataset_len =  37497
+        if test:
+            dataset_len = 2050
+        else:
+            dataset_len =  37497
         #_,_,self.observed_images = load_x_y_from_cache(load_dir)
         #print("Finished loading images\n")
         prev_time = time.time()
@@ -182,9 +203,12 @@ class UnconditionalDataset(torch.utils.data.Dataset):
 
 
 class ConditionalDataset(torch.utils.data.Dataset):
-    def __init__(self, device='cpu', highres= True):
+    def __init__(self, device='cpu', highres= True, test=False):
         load_dir = "/mnt/ds3lab-scratch/dslab2019/shghosh/preprocessed"
-        dataset_len =  37497
+        if test:
+            dataset_len = 2050
+        else:
+            dataset_len =  37497
         self.predictions = (np.zeros((dataset_len, 128, 192))+0.1).astype(float)
         self.observations = (np.zeros((dataset_len, 128, 192))+0.1).astype(float)
         self.observations_highres = (np.zeros((dataset_len, 256, 384))+0.1).astype(float)
@@ -202,17 +226,18 @@ class ConditionalDataset(torch.utils.data.Dataset):
         #self.observations_highres = np.concatenate((self.observations_highres, rand_mat), axis=1)
         #rand_mat = (np.random.rand(self.observations_highres.shape[0],self.observations_highres.shape[1],9)+0.1).astype(float)
         #self.observations_highres = np.concatenate((self.observations_highres, rand_mat), axis=2)
-        median_val = np.mean(self.observations.sum(axis=(1,2)))/2.0
-        idx_retain = self.observations.sum(axis=(1,2)) > median_val
+        # Standardizing images
+        self.predictions = self.standardize_images(self.predictions)
+        self.observations = self.standardize_images(self.observations)
+        self.observations_highres = self.standardize_images(self.observations_highres)
+
+        median_val = np.mean(self.observations.sum(axis=(1,2,3)))*2.0
+        idx_retain = self.observations.sum(axis=(1,2,3)) > median_val
         self.predictions = self.predictions[idx_retain]
         self.observations = self.observations[idx_retain]
         self.observations_highres = self.observations_highres[idx_retain]
         self.highres = highres
 
-        # Standardizing images
-        self.predictions = self.standardize_images(self.predictions)
-        self.observations = self.standardize_images(self.observations)
-        self.observations_highres = self.standardize_images(self.observations_highres)
 
         ## Are we changing the data by standardizing, should we revert before plotting
 
@@ -224,8 +249,29 @@ class ConditionalDataset(torch.utils.data.Dataset):
         #image_set -= np.mean(image_set, axis=0, keepdims=True)
         #image_set /= 2.0*np.std(image_set, axis = 0, keepdims=True)
         #image_set += 0.5
+        #image_set = np.sqrt(image_set)
+        image_set = image_set /10.0
+        image_set = np.clip(image_set, a_min=0.0, a_max=1.0)
         image_set = np.expand_dims(image_set, axis=1)
         return image_set
+
+    def get_tiles(self, image_set):
+        offset = int(self.image_size/2)
+        def read_y_rows():
+            return array[offset:rows + offset]
+
+
+        def read_x_cols(array, cols, offset):
+            return list(row[offset:cols + offset] for row in array)
+
+
+            result = []
+            for start_row in range(len(array) - y_dim_rows + 1):
+                y_rows = read_y_rows(array, y_dim_rows, start_row)
+                for start_col in range(len(max(array, key=len)) - x_dim_cols + 1):
+                    x_columns = read_x_cols(y_rows, x_dim_cols, start_col)
+                    result.append(x_columns)
+        return result
 
     def __getitem__(self, index):
         if self.highres:
