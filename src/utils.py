@@ -1,4 +1,6 @@
-#Header files
+import torch
+
+import numpy as np
 import xarray as xr
 import pyproj
 import torch
@@ -174,3 +176,47 @@ def weights_init(m):
         torch.nn.init.normal_(m.weight, 1.0, 0.02)
         torch.nn.init.zeros_(m.bias)
 
+##################################################################################################################################
+
+# function to plot images
+def plot_images(images, path):
+    fig, axs =  plt.subplots(ncols=8, nrows=8, figsize=(16,16))
+    #nrow = np.sqrt(images.shape[0])
+    for i in range(images.shape[0]):
+        row_num = int(i / 8)
+        col_num = int(i % 8)
+        im = axs[row_num, col_num].pcolormesh(images[i,0], vmin=0, vmax=1, cmap='viridis')
+        fig.colorbar(im, ax=axs[row_num, col_num])
+    plt.savefig(path)
+
+
+#Function to plot single image pair -- conditional
+def plot_image_single_conditional(generated, observed, path):
+    plt.figure(figsize=(6,3.2))
+    fig, ax  = plt.subplots(1,2)
+    ax[0].set_title("Generated")
+    ax[0].imshow(generated, vmin=0, vmax=1)
+    ax[1].set_title("Observed")
+    ax[1].imshow(observed, vmin=0, vmax=1)
+    plt.savefig(path)
+
+#Function to plot single image unconditional
+def plot_image_single_unconditional(generated, path):
+    plt.figure(figsize=(4,4))
+    plt.imshow(generated, vmin=0, vmax=1)
+    plt.savefig(path)
+
+# custom weights initialization called on netG and netD
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv') != -1:
+        torch.nn.init.normal_(m.weight, 0.0, 0.02)
+    elif classname.find('BatchNorm') != -1:
+        torch.nn.init.normal_(m.weight, 1.0, 0.02)
+        torch.nn.init.zeros_(m.bias)
+
+
+
+class Flatten(torch.nn.Module):
+    def forward(self, x):
+        return x.view(x.size(0), -1)
