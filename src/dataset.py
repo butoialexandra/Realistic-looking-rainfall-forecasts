@@ -67,10 +67,11 @@ def load_predictions(base_dir, on_cluster=False):
 def load_predictions_from_cache(load_dir, verbose=True):
     predictions = []
     for filename in glob.glob(f"{load_dir}/predictions*.pt"):
-        predictions.append(torch.load(filename).numpy())
+        predictions.append(torch.load(filename))
         if verbose:
             print(f"Loaded {filename}")
-    predictions = np.concatenate(predictions,axis=0) 
+    # predictions = np.concatenate(predictions,axis=0) 
+    predictions = torch.cat(predictions, dim=0)
     return predictions
 
 def load_x_y_from_cache(load_dir, test=False, verbose=True):
@@ -81,38 +82,38 @@ def load_x_y_from_cache(load_dir, test=False, verbose=True):
         idx_set = [1,2]
         for idx in idx_set:
             filename = f"{load_dir}/predictions.{idx}.pt"
-            predictions.append(torch.load(filename).numpy())
+            predictions.append(torch.load(filename))
             if verbose:
                 print(f"Loaded {filename}")
         for idx in idx_set:
             filename = f"{load_dir}/observations.{idx}.pt"
-            observations.append(torch.load(filename).numpy())
+            observations.append(torch.load(filename))
             if verbose:
                 print(f"Loaded {filename}")
         for idx in idx_set:
             filename = f"{load_dir}/observations_hr.{idx}.pt"
-            observations_hr.append(torch.load(filename).numpy())
+            observations_hr.append(torch.load(filename))
             if verbose:
                 print(f"Loaded {filename}")
     else:
         for filename in glob.glob(f"{load_dir}/predictions*.pt"):
-            predictions.append(torch.load(filename).numpy())
+            predictions.append(torch.load(filename))
             if verbose:
                 print(f"Loaded {filename}")
         
         for filename in glob.glob(f"{load_dir}/observations.*.pt"):
-            observations.append(torch.load(filename).numpy())
+            observations.append(torch.load(filename))
             if verbose:
                 print(f"Loaded {filename}")
 
         for filename in glob.glob(f"{load_dir}/observations_hr.*.pt"):
-            observations_hr.append(torch.load(filename).numpy())
+            observations_hr.append(torch.load(filename))
             if verbose:
                 print(f"Loaded {filename}")
 
-    predictions = np.concatenate(predictions,axis=0)
-    observations = np.concatenate(observations, axis=0)
-    observations_hr = np.concatenate(observations_hr, axis=0)
+    predictions = torch.cat(predictions, dim=0)
+    observations = torch.cat(observations, dim=0)
+    observations_hr = torch.cat(observations_hr, dim=0)
     return predictions, observations, observations_hr
 
 
@@ -209,10 +210,16 @@ class ConditionalDataset(torch.utils.data.Dataset):
             dataset_len = 2050
         else:
             dataset_len =  37497
-        self.predictions = (np.zeros((dataset_len, 128, 192))+0.1).astype(float)
-        self.observations = (np.zeros((dataset_len, 128, 192))+0.1).astype(float)
-        self.observations_highres = (np.zeros((dataset_len, 256, 384))+0.1).astype(float)
+        #self.predictions = (np.zeros((dataset_len, 128, 192))+0.1).astype(float)
+        #self.observations = (np.zeros((dataset_len, 128, 192))+0.1).astype(float)
+        # self.observations_highres = (np.zeros((dataset_len, 256, 384))+0.1).astype(float)
+
+        self.predictions = torch.zeros([dataset_len, 128, 192], dtype=torch.float)
+        self.observations = torch.zeros([dataset_len, 128, 192], dtype=torch.float)
+        self.observations_highres = torch.zeros([dataset_len, 256, 384], dtype=torch.float)
+
         self.predictions[:, :-1, :-4], self.observations[:,:-1,:-4], self.observations_highres[:,:-3, :-9] = load_x_y_from_cache(load_dir)
+
         #self.predictions = self.predictions[:len(self.observations)] #Can remove once all the data is cached
         #rand_mat = (np.random.rand(self.predictions.shape[0],1,self.predictions.shape[2])+0.1).astype(float)
         #self.predictions = np.concatenate((self.predictions, rand_mat), axis=1)
@@ -231,11 +238,17 @@ class ConditionalDataset(torch.utils.data.Dataset):
         self.observations = self.standardize_images(self.observations)
         self.observations_highres = self.standardize_images(self.observations_highres)
 
-        median_val = np.mean(self.observations.sum(axis=(1,2,3)))*2.0
-        idx_retain = self.observations.sum(axis=(1,2,3)) > median_val
+        median_val = torch.mean(self.observations.sum(dim=(1,2,3))) * 2.0
+        idx_retain = self.observations.sum(dim=(1,2,3)) > median_val
         self.predictions = self.predictions[idx_retain]
         self.observations = self.observations[idx_retain]
         self.observations_highres = self.observations_highres[idx_retain]
+
+        # median_val = np.mean(self.observations.sum(axis=(1,2,3)))*2.0
+        # idx_retain = self.observations.sum(axis=(1,2,3)) > median_val
+        # self.predictions = self.predictions[idx_retain]
+        # self.observations = self.observations[idx_retain]
+        # self.observations_highres = self.observations_highres[idx_retain]
         self.highres = highres
 
 
@@ -245,14 +258,9 @@ class ConditionalDataset(torch.utils.data.Dataset):
         return len(self.predictions)
 
     def standardize_images(self, image_set):
-        #Standardizing to 0.5 mean, 0.5 std
-        #image_set -= np.mean(image_set, axis=0, keepdims=True)
-        #image_set /= 2.0*np.std(image_set, axis = 0, keepdims=True)
-        #image_set += 0.5
-        #image_set = np.sqrt(image_set)
-        image_set = image_set /10.0
-        image_set = np.clip(image_set, a_min=0.0, a_max=1.0)
-        image_set = np.expand_dims(image_set, axis=1)
+        image_set = image_set / 10.0  # TODO: sqrt?
+        image_set = torch.clip(image_set, 0.0, 1.0)
+        image_set = torch.unsqueeze(image_set, dim=1)
         return image_set
 
     def get_tiles(self, image_set):

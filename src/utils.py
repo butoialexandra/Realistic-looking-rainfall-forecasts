@@ -214,6 +214,17 @@ def weights_init(m):
         torch.nn.init.zeros_(m.bias)
 
 
+def upscale_input(x, mode='copy'):
+    if mode == 'copy':
+        # This copies every element in the 2nd and 3rd dims twice.
+        # Example in 1D: [1,2,3] -> [1,1,2,2,3,3]
+        x = torch.repeat_interleave(x, 2, dim=2)
+        x = torch.repeat_interleave(x, 2, dim=3)
+        return x
+    elif mode == 'interpolate':
+        raise Exception("Not implemented")
+    raise Exception(f"Unknown upscale mode: {mode}")
+
 
 class Flatten(torch.nn.Module):
     def forward(self, x):
