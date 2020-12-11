@@ -28,7 +28,10 @@ def power_spectrum_dB(img):
     fx = np.fft.fft2(img)
     #fx = fx[:img.shape[0]//2,:img.shape[1]//2]
     px = abs(fx)**2
-    return 10 * np.log10(px)
+    px =  10 * np.log10(px)
+    # px[~np.isfinite(px)] = np.nan
+
+    return px
 
 def power_spectrum_batch_avg(imgs):
     """
@@ -40,6 +43,7 @@ def power_spectrum_batch_avg(imgs):
     batch_size = imgs.shape[0]
     for i in range(0, batch_size):
         power_spectrum[i,:,:] = power_spectrum_dB(imgs[i,:,:])
+        #power_spectrum[i,:,:][~np.isfinite(power_spectrum[i,:,:])] = np.nan
     return np.nanmean(power_spectrum, axis=0)
 
 def log_spectral_distance_batch(preds, obs):
