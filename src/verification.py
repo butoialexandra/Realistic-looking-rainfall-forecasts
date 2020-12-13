@@ -100,3 +100,13 @@ def log_spectral_distance_pairs_avg(preds, obs):
         lsds[i] = log_spectral_distance(preds[i,:,:], obs[i,:,:])
     return np.nanmean(lsds)
 
+def rmse(generated, real):
+    """
+    Computes root mean squared error between a batch of generated
+    and a batch of real images
+    :param generated: batch of generated imgs
+    :param real: batch of real imgs
+    :return: RMSE
+    """
+    return np.sqrt(((generated-real)**2).mean())
+
