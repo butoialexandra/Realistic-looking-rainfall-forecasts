@@ -186,11 +186,11 @@ if __name__ == "__main__":
                 # writer.add_scalar('Log spectral distance', lsd, batches_done)
                 gen_imgs = torch.squeeze(gen_imgs, 1).detach().numpy()
                 real_imgs = torch.squeeze(real_imgs, 1).detach().numpy()
-                for i in range(gen_imgs.shape[0]):
-                    print(log_spectral_distance_pairs_avg(gen_imgs, real_imgs))
-                    plot_power_spectrum(power_spectrum_dB(gen_imgs[i,:,:]), "Power spectrum")
-                # writer.add_figure('Generated images', plot_images(gen_imgs, real_imgs, pred_imgs, batches_done),
-                #                   global_step=batches_done)
+                # for i in range(gen_imgs.shape[0]):
+                #     print(log_spectral_distance_pairs_avg(gen_imgs, real_imgs))
+                #     plot_power_spectrum(power_spectrum_dB(gen_imgs[i,:,:]), "Power spectrum")
+                writer.add_figure('Generated images', plot_images(gen_imgs, real_imgs, pred_imgs, batches_done),
+                                  global_step=batches_done)
                 writer.add_figure('Power spectrum generated', plot_power_spectrum(power_spectrum_batch_avg(gen_imgs), "Power spectrum generated"),
                                   global_step=batches_done)
 

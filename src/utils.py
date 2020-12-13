@@ -213,7 +213,6 @@ def plot_power_spectrum(power_spectrum, title):
     plt.title(title)
     plt.pcolormesh(power_spectrum)
     plt.colorbar()
-    plt.show()
 
     return fig
 

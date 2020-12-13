@@ -3,7 +3,8 @@ import torch
 import numpy as np
 from torch.nn import init
 from torch.autograd import Variable
-from verification import crps, log_spectral_distance
+from matplotlib import colors
+import matplotlib
 import random
 
 def init_weights(m):
@@ -117,26 +118,37 @@ def pad(x, y):
 
     return pred, obs
 
+def plot_image(img, cmap, vmin, value_range):
+    plt.imshow(img, interpolation='nearest', cmap=cmap, vmin=vmin,
+               norm=colors.Normalize(*value_range))
+    plt.gca().tick_params(left=False, bottom=False,
+                          labelleft=False, labelbottom=False)
+
+
 def plot_images(gen_imgs, real_imgs, pred_imgs, batches_done):
     assert gen_imgs.shape[0] == real_imgs.shape[0]
     assert real_imgs.shape[0] == pred_imgs.shape[0]
+    cmap = matplotlib.cm.get_cmap('viridis')
+    cmap.set_under('w')
+
     batch_size = real_imgs.shape[0] if real_imgs.shape[0] <4 else 4
 
     fig = plt.figure(figsize=(9, 3.2 * batch_size))
     for i in range(batch_size):
         ax = fig.add_subplot(batch_size, 3, i * 3 + 1)
         ax.set_title('Forecast')
-        plt.imshow(pred_imgs[i, :, :, :].squeeze().detach().cpu())
+        #plt.imshow(pred_imgs[i, :, :].squeeze(), interpolation='nearest', cmap=cmap, vmin=0.0001, norm=colors.Normalize(*(0,1)))
+        plot_image(pred_imgs[i, :, :].squeeze(), cmap, 0.0001, (0,1))
         plt.colorbar(orientation='vertical')
 
         ax = fig.add_subplot(batch_size, 3, i * 3 + 2)
         ax.set_title('Observation')
-        plt.imshow(real_imgs[i, :, :, :].squeeze().detach().cpu())
+        plot_image(real_imgs[i, :, :].squeeze(), cmap, 0.0001, (0, 1))
         plt.colorbar(orientation='vertical')
 
         ax = fig.add_subplot(batch_size, 3, i * 3 + 3)
         ax.set_title('Output')
-        plt.imshow(gen_imgs[i, :, :, :].squeeze().detach().cpu())
+        plot_image(gen_imgs[i, :, :].squeeze(), cmap, 0.0001, (0, 1))
         plt.colorbar(orientation='vertical')
     plt.savefig("images/%d.png" % batches_done)
 

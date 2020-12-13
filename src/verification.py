@@ -1,10 +1,34 @@
 import numpy as np
 from pysteps import verification
 
-def crps(pred, obs):
-    crps = verification.probscores.CRPS_init()
-    verification.probscores.CRPS_accum(crps, pred, obs)
-    return verification.probscores.CRPS_compute(crps)
+def crps_ensemble(observation, forecasts):
+    """
+    Computes per image continuous ranked probability score between
+    an observation and a probabilistic forecast; code adapted from
+    https://github.com/jleinonen/downscaling-rnn-gan/blob/master/dsrnngan/crps.py
+    :param observation: observation shaped (height, width)
+    :param forecasts: forecast shaped (height, width, members)
+    :return: per image CRPS
+    """
+    fc = forecasts.copy()
+    fc.sort(axis=-1)
+    obs = observation
+    fc_below = fc<obs[...,None]
+    crps = np.zeros_like(obs)
+
+    for i in range(fc.shape[-1]):
+        below = fc_below[...,i]
+        weight = ((i+1)**2 - i**2) / fc.shape[-1]**2
+        crps[below] += weight * (obs[below]-fc[...,i][below])
+
+    for i in range(fc.shape[-1]-1,-1,-1):
+        above  = ~fc_below[...,i]
+        k = fc.shape[-1]-1-i
+        weight = ((k+1)**2 - k**2) / fc.shape[-1]**2
+        crps[above] += weight * (fc[...,i][above]-obs[above])
+
+    return np.mean(crps)
+
 
 def log_spectral_distance(pred, obs):
     """
