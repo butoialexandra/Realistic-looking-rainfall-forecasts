@@ -206,6 +206,18 @@ def plot_image_single_unconditional(generated, path):
     plt.imshow(generated, vmin=0, vmax=1)
     plt.savefig(path)
 
+# function to plot power spectrum
+def plot_power_spectrum(power_spectrum, title):
+    #power_spectrum[~np.isnan(power_spectrum)] = 0
+    fig = plt.figure(figsize=(6, 3.2))
+    plt.title(title)
+    plt.pcolormesh(power_spectrum)
+    plt.colorbar()
+    plt.show()
+
+    return fig
+
+
 # custom weights initialization called on netG and netD
 def weights_init(m):
     classname = m.__class__.__name__

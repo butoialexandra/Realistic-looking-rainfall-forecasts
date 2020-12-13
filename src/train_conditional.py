@@ -14,6 +14,8 @@ from cond_dataset import Dataset
 from dataset import ConditionalDataset
 from src.modules import Generator, Discriminator, ESRGAN
 from util import init_weights, plot_images
+from utils import plot_power_spectrum
+from verification import power_spectrum_batch_avg, power_spectrum_dB, log_spectral_distance_pairs_avg
 
 # def calc_gradient_penalty(discriminator, real_data, fake_data, pred_data, batch_size, use_cuda, gpu, lmbda):
 #     #print real_data.size()
@@ -41,11 +43,11 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--n_epochs", type=int, default=50, help="number of epochs of training")
-    parser.add_argument("--batch_size", type=int, default=3, help="size of the batches")
+    parser.add_argument("--batch_size", type=int, default=2, help="size of the batches")
     parser.add_argument("--lr", type=float, default=0.002, help="adam: learning rate")
     parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
     parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
-    parser.add_argument("--sample_interval", type=int, default=5, help="interval between image sampling")
+    parser.add_argument("--sample_interval", type=int, default=1, help="interval between image sampling")
     parser.add_argument("--n_critic", type=int, default=5, help="number of training steps for discriminator per iter")
     parser.add_argument("--clip_value", type=float, default=0.1, help="lower and upper clip value for disc. weights")
     parser.add_argument("--device", type=int, default=0, help="the ID of the gpu to run on")
@@ -53,7 +55,7 @@ if __name__ == "__main__":
     print(opt)
 
     os.makedirs("../images", exist_ok=True)
-    out_dir = '../runs/{}'.format(datetime.datetime.now())
+    out_dir = 'runs/{}'.format(datetime.datetime.now())
     writer = SummaryWriter(out_dir)
 
     if torch.cuda.is_available():
@@ -69,6 +71,7 @@ if __name__ == "__main__":
 
     # Initialize generator and discriminator
     generator = ESRGAN(1, 1)
+    # generator = Generator()
     discriminator = Discriminator()
 
     # Initialize xavier
@@ -81,15 +84,16 @@ if __name__ == "__main__":
         adversarial_loss.cuda()
 
     training_params = {"batch_size": opt.batch_size, "shuffle": True, "num_workers": 0}
-    training_data = ConditionalDataset(device=device)
-    # train_idx, test_idx = training_data.train_test_split_ids(how='seq')
-    # training_data.select_indices(train_idx, shuffle=True)  # TODO: this might cause problems!
+    # training_data = ConditionalDataset(device=device)
+    training_data = Dataset(device=device)
+    train_idx, test_idx = training_data.train_test_split_ids(how='seq')
+    training_data.select_indices(train_idx, shuffle=True)  # TODO: this might cause problems!
     training_generator = torch.utils.data.DataLoader(training_data, **training_params)
-    #
-    # validation_params = {"batch_size": opt.batch_size, "shuffle": False, "num_workers": 0}
-    # validation_data = Dataset(device=device)
-    # validation_data.select_indices(test_idx, shuffle=False)  # here order doesn't matter
-    # validation_generator = torch.utils.data.DataLoader(validation_data, **validation_params)
+
+    validation_params = {"batch_size": opt.batch_size, "shuffle": False, "num_workers": 0}
+    validation_data = Dataset(device=device)
+    validation_data.select_indices(test_idx, shuffle=False)  # here order doesn't matter
+    validation_generator = torch.utils.data.DataLoader(validation_data, **validation_params)
 
     # Optimizers
     optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
@@ -180,7 +184,14 @@ if __name__ == "__main__":
                 # sample_image(validation_data, n_row=4, batches_done=batches_done, generator=generator, device=device)
                 # # writer.add_scalar('CRPS', crps, batches_done)
                 # writer.add_scalar('Log spectral distance', lsd, batches_done)
-                writer.add_figure('Generated images', plot_images(gen_imgs, real_imgs, pred_imgs, batches_done),
+                gen_imgs = torch.squeeze(gen_imgs, 1).detach().numpy()
+                real_imgs = torch.squeeze(real_imgs, 1).detach().numpy()
+                for i in range(gen_imgs.shape[0]):
+                    print(log_spectral_distance_pairs_avg(gen_imgs, real_imgs))
+                    plot_power_spectrum(power_spectrum_dB(gen_imgs[i,:,:]), "Power spectrum")
+                # writer.add_figure('Generated images', plot_images(gen_imgs, real_imgs, pred_imgs, batches_done),
+                #                   global_step=batches_done)
+                writer.add_figure('Power spectrum generated', plot_power_spectrum(power_spectrum_batch_avg(gen_imgs), "Power spectrum generated"),
                                   global_step=batches_done)
 
         torch.save(generator.state_dict(), '%s/generator_epoch_%d.pth' % (out_dir, epoch))
