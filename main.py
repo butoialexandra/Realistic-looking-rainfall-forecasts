@@ -13,6 +13,7 @@ import torchvision.transforms as transforms
 import torchvision.utils as vutils
 from dataset import UnconditionalDataset, ConditionalDataset, UnconditionalDatasetObservations
 from torch.utils.tensorboard import SummaryWriter
+import math
 
 from datetime import datetime
 import os
@@ -34,7 +35,7 @@ parser.add_argument('--imageSize', type=int, default=64, help='the height / widt
 parser.add_argument('--nz', type=int, default=100, help='size of the latent z vector')
 parser.add_argument('--ngf', type=int, default=64)
 parser.add_argument('--ndf', type=int, default=64)
-parser.add_argument('--niter', type=int, default=25, help='number of epochs to train for')
+parser.add_argument('--niter', type=int, default=200, help='number of epochs to train for')
 parser.add_argument('--lr', type=float, default=0.0002, help='learning rate, default=0.0002')
 parser.add_argument('--beta1', type=float, default=0.5, help='beta1 for adam. default=0.5')
 parser.add_argument('--cuda', action='store_true', help='enables cuda')
@@ -48,6 +49,7 @@ parser.add_argument('--classes', default='bedroom', help='comma separated list o
 parser.add_argument('--on_cluster', default=False, action='store_true', help='flag to indicate if using cluster')
 parser.add_argument('--conditional', default=False, action='store_true', help='flag to indicate if using cluster')
 parser.add_argument('--highres', default=False, action='store_true', help='flag to indicate if using cluster')
+parser.add_argument('--test_fraction', default=0.25, type=float, help='fraction of data to be used for testing for cGAN')
 opt = parser.parse_args()
 print(opt)
 
@@ -112,7 +114,7 @@ elif opt.dataset == 'mnist':
 
 elif opt.dataset == 'cosmo':
     if opt.conditional:
-        dataset = ConditionalDataset(device=device, highres = opt.highres)
+        dataset = ConditionalDataset(device=device, img_size = opt.imageSize, highres = opt.highres)
     else:
         dataset = UnconditionalDatasetObservations(device=device, on_cluster=opt.on_cluster)
         print("Finished loading dataset")
@@ -125,6 +127,14 @@ elif opt.dataset == 'fake':
     nc=3
 
 assert dataset
+if opt.conditional:
+    num_data = len(dataset)
+    train_idx = range(math.floor((1.0 - opt.test_fraction)*num_data))
+    test_idx = range(math.ceil((1.0 - opt.test_fraction)*num_data), num_data)
+    dataloader = torch.utils.data.DataLoader(train_dataset, batch_size = opt.batchSize,
+                                                   shuffle=True, num_workers=int(opt.workers))
+    test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size = opt.batchSize,
+                                                   shuffle=False, num_workers=int(opt.workers))
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
                                          shuffle=False, num_workers=int(opt.workers))
 print("Finished Dataloader", time.time()-main_time)
@@ -405,9 +415,76 @@ class CondGeneratorHighres(nn.Module):
             noisy_encoded = torch.cat((encoded, noise),1)
             output = self.decoder(noisy_encoded)
         return output
+
+class CondGeneratorHighresTile(nn.Module):
+    def __init__(self, ngpu):
+        super(CondGeneratorHighresTile, self).__init__()
+        self.ngpu = ngpu
+        self.encoder = nn.Sequential(
+            # input is (nc) x 32 x 32
+            nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf) x 16 x 16
+            nn.Conv2d(ndf, ndf, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf) x 8 x 8
+            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(ndf*2, 1, 1, bias=False),
+            #add flatten layer
+            nn.Flatten()
+            #nn.BatchNorm2d(ndf * 2),
+            #nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*2) x 16 x 16
+            #nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
+            #nn.BatchNorm2d(ndf * 4),
+            #nn.LeakyReLU(0.2, inplace=True),
+            ## state size. (ndf*4) x 8 x 8
+            #nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
+            #nn.BatchNorm2d(ndf * 8),
+            #nn.LeakyReLU(0.2, inplace=True),
+            ## state size. (ndf*8) x 4 x 4
+            #nn.Conv2d(ndf * 8, 1, (4,6), 1, 0, bias=False),
+            #nn.LeakyReLU(0.2, inplace=True)
+        )
+
+        self.decoder = nn.Sequential(
+            # input is Z, going into a convolution
+            nn.ConvTranspose2d(16+nz, ngf * 8, 4, 1, 0, bias=False),
+            nn.BatchNorm2d(ngf * 8),
+            nn.ReLU(True),
+            # state size. (ngf*16) x 4 x 4
+            nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 4),
+            nn.ReLU(True),
+            # state size. (ngf*8) x 8 x 8
+            nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 2),
+            nn.ReLU(True),
+            # state size. (ngf*4) x 16 x 16
+            nn.ConvTranspose2d(ngf * 2,     ngf, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf),
+            nn.ReLU(True),
+            # state size. (ngf*2) x 32 x 32
+            nn.ConvTranspose2d(ngf,     nc, 4, 2, 1, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, input, noise):
+        if input.is_cuda and self.ngpu > 1:
+            encoded = nn.parallel.data_parallel(self.encoder, input, range(self.ngpu))
+            encoded = encoded.view(encoded.size(0),encoded.size(1),1,1)
+            noisy_encoded = torch.cat((encoded,noise),1)
+            output = nn.parallel.data_parallel(self.decoded, noisy_encoded, range(self.ngpu))
+        else:
+            encoded = self.encoder(input)
+            encoded = encoded.view(encoded.size(0), encoded.size(1),1,1)
+            noisy_encoded = torch.cat((encoded, noise),1)
+            output = self.decoder(noisy_encoded)
+        return output
 #add condition for highres
 if opt.conditional and opt.highres:
-    netG = CondGeneratorHighres(ngpu).to(device)
+    netG = CondGeneratorHighresTile(ngpu).to(device)
 elif opt.conditional and not opt.highres:
     netG = CondGenerator(ngpu).to(device)
 elif opt.highres:
@@ -498,8 +575,40 @@ class DiscriminatorHighres(nn.Module):
 
         return output.view(-1, 1).squeeze(1)
 
+class DiscriminatorHighresTile(nn.Module):
+    def __init__(self, ngpu):
+        super(DiscriminatorHighresTile, self).__init__()
+        self.ngpu = ngpu
+        self.main = nn.Sequential(
+            # input is (nc_disc) x 64 x 64
+            nn.Conv2d(nc_disc, ndf, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf) x 32 x 32
+            nn.Conv2d(ndf, ndf, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf) x 16 x 16
+            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 2),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*2) x 8 x 8
+            nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 4),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*4) x 4 x 4
+            # state size. (ndf*8) x 4 x 6
+            nn.Conv2d(ndf * 4, 1, 4, 1, 0, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, input):
+        if input.is_cuda and self.ngpu > 1:
+            output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
+        else:
+            output = self.main(input)
+
+        return output.view(-1, 1).squeeze(1)
 if opt.highres:
-    netD = DiscriminatorHighres(ngpu).to(device)
+    netD = DiscriminatorHighresTile(ngpu).to(device)
 else:
     netD = Discriminator(ngpu).to(device)
 netD.apply(weights_init)
@@ -516,6 +625,53 @@ fake_label = 0
 # setup optimizer
 optimizerD = optim.Adam(netD.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
 optimizerG = optim.Adam(netG.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
+
+
+def test_loop_conditional(netG):
+    crps = 0
+    lsd = 0
+    rmse = 0
+    step = 0
+    for i, (x, y) in enumerate(valid_ds, 0):
+        step += 1
+        data = y
+        real = data.to(device)
+        pred = x.to(device)
+        real = real.float()
+        pred = pred.float()
+        batch_size = real.size(0)
+
+        noise = torch.randn(batch_size, nz, device=device)
+        fake = netG(pred, noise)
+
+        real = real.detach().cpu().numpy()
+        fake = fake.detach().cpu().numpy()
+        lsd += log_spectral_distance_pairs_avg(real, fake)
+        rmse += rmse(real, fake)
+        ensemble = generate_ensemble(netG, pred, 10)
+        ensemble = ensemble.detach().cpu().numpy()
+        crps += crps_ensemble(real, ensemble)
+
+    lsd, rmse, crps = lsd / step, rmse / step, crps / step
+    return lsd, rmse, crps
+
+
+def generate_ensemble(netG, pred, no_members):
+    batch_size = pred.size(0)
+    noise = torch.randn(batch_size, nz, device=device)
+    fake = netG(pred, noise)
+    fake = torch.unsqueeze(fake, 2)
+
+    for i in range(no_members - 1):
+        noise = torch.randn(batch_size, nz, device=device)
+        new_fake = netG(pred, noise)
+        new_fake = torch.unsqueeze(new_fake, 2)
+        fake = torch.cat([fake, new_fake], 2)
+
+    return fake
+
+
+
 
 if opt.dry_run:
     opt.niter = 1
@@ -597,17 +753,17 @@ if opt.conditional:
                 #vutils.save_image(real_cpu,
                 #        '%s/real_samples.png' % opt.outf,
                 #        normalize=True)
-                plot_images(real_cpu.cpu().numpy(), f"{opt.outf}/real_samples_epoch_{epoch}.png")
+                plot_images(real_cpu.cpu().numpy(), f"{opt.outf}/real_samples_epoch_{epoch}_batch_{i}.png")
                 if opt.highres:
-                    plot_images(pred_double.cpu().numpy(), f"{opt.outf}/pred_samples_epoch_{epoch}.png")
+                    plot_images(pred_double.cpu().numpy(), f"{opt.outf}/pred_samples_epoch_{epoch}_batch_{i}.png")
                 else:
-                    plot_images(pred.cpu().numpy(), f"{opt.outf}/pred_samples_epoch_{epoch}.png")
+                    plot_images(pred.cpu().numpy(), f"{opt.outf}/pred_samples_epoch_{epoch}_batch_{i}.png")
                 fake = netG(pred, fixed_noise)
                 #vutils.save_image(fake.detach(),
                 #        '%s/fake_samples_epoch_%03d.png' % (opt.outf, epoch),
                 #        normalize=True)
-                plot_images(fake.detach().cpu().numpy(), f"{opt.outf}/fake_samples_epoch_{epoch}.png")
-                plot_image_single_conditional(fake[0][0].detach().cpu().numpy(), real_cpu[0][0].cpu().numpy(), f"{opt.outf}/image_pair_{epoch}.png")
+                plot_images(fake.detach().cpu().numpy(), f"{opt.outf}/fake_samples_epoch_{epoch}_batch_{i}.png")
+                plot_image_single_conditional(fake[0][0].detach().cpu().numpy(), real_cpu[0][0].cpu().numpy(), f"{opt.outf}/image_pair_{epoch}_batch_{i}.png")
             if opt.dry_run:
                 break
         # do checkpointing
