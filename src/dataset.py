@@ -96,20 +96,16 @@ def load_x_y_from_cache(load_dir, test=False, verbose=True):
             if verbose:
                 print(f"Loaded {filename}")
     else:
-        for filename in glob.glob(f"{load_dir}/predictions*.pt"):
-            predictions.append(torch.load(filename))
-            if verbose:
-                print(f"Loaded {filename}")
-        
-        for filename in glob.glob(f"{load_dir}/observations.*.pt"):
-            observations.append(torch.load(filename))
-            if verbose:
-                print(f"Loaded {filename}")
+        pred_files = sorted(glob.glob(f"{load_dir}/predictions*.pt"))
+        obs_files = sorted(glob.glob(f"{load_dir}/observations.*.pt"))
+        obs_hr_files = sorted(glob.glob(f"{load_dir}/observations_hr.*.pt"))
 
-        for filename in glob.glob(f"{load_dir}/observations_hr.*.pt"):
-            observations_hr.append(torch.load(filename))
+        for pred_f, obs_f, obs_hr_f in tqdm(zip(pred_files, obs_files, obs_hr_files), total=len(pred_files)):
+            predictions.append(torch.load(pred_f))
+            observations.append(torch.load(obs_f))
+            observations_hr.append(torch.load(obs_hr_f))
             if verbose:
-                print(f"Loaded {filename}")
+                print(pred_f)
 
     predictions = torch.cat(predictions, dim=0)
     observations = torch.cat(observations, dim=0)
@@ -209,7 +205,7 @@ class ConditionalDataset(torch.utils.data.Dataset):
         if test:
             dataset_len = 2050
         else:
-            dataset_len =  37497
+            dataset_len =  36472
         #self.predictions = (np.zeros((dataset_len, 128, 192))+0.1).astype(float)
         #self.observations = (np.zeros((dataset_len, 128, 192))+0.1).astype(float)
         # self.observations_highres = (np.zeros((dataset_len, 256, 384))+0.1).astype(float)
@@ -432,12 +428,13 @@ def create_training_dataset(out_dir="/mnt/ds3lab-scratch/dslab2019/shghosh/prepr
         buffer_y.append(y)
         buffer_y_highres.append(y_highres)
 
-        if len(buffer_x) > 1024:
+        if len(buffer_x) > 32: # 1024:
             save_buffer_to_file(buffer_x, join(out_dir, f"x.{file_offset}.pt"))
             save_buffer_to_file(buffer_y, join(out_dir, f"y.{file_offset}.pt"))
             save_buffer_to_file(buffer_y_highres, join(out_dir, f"yHighres.{file_offset}.pt"))
             file_offset += 1
             buffer_x, buffer_y, buffer_y_highres = [], [], []
+            plot_images_ncols(buffer_x, buffer_y, buffer_y_highres, path="buf%d.png" % i)
 
     if len(buffer_x) > 0:
         save_buffer_to_file(buffer_x, join(out_dir, f"x.{file_offset}.pt"))
@@ -446,7 +443,13 @@ def create_training_dataset(out_dir="/mnt/ds3lab-scratch/dslab2019/shghosh/prepr
 
 
 if __name__ == "__main__":
-    create_training_dataset()
+    from utils import plot_images_ncols
+    cachedir = "/mnt/ds3lab-scratch/dslab2019/shghosh/preprocessed"
+    preds, obs, obs_hr = load_x_y_from_cache(cachedir)
+    plot_images_ncols(preds[10000:10100], obs[10000:10100], obs_hr[10000:10100], path='test.png')
+
+    #create_training_dataset("/mnt/ds3lab-scratch/mzilinec/testds/")
     # d = Dataset()
     # prec_pred, prec_real = d.get_x_y_at_time(0)
     # plotit()
+
