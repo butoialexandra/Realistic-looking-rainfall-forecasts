@@ -24,6 +24,7 @@ import socket
 from discriminator import *
 from generator import *
 from utils import *
+from verification import *
 
 
 datetimestr = datetime.now().strftime("%d-%b-%Y-%H:%M")
@@ -92,8 +93,7 @@ elif opt.dataset == 'cond-cosmo':
 else:
     raise Exception("Invalid dataset %s" % opt.dataset)
 
-
-if opt.model == 'vae':
+if opt.conditional:
     test_len = int(len(dataset) / 10)
     train_len = len(dataset) - test_len
     train_ds, valid_ds = torch.utils.data.random_split(dataset, lengths=[train_len, test_len], generator=torch.Generator().manual_seed(42))
@@ -205,7 +205,7 @@ def train_loop_conditional(opt, netG, netD, optimizerG, optimizerD, criterion, f
     global_step = 0
 
     for epoch in range(opt.epochs):
-        for i, (x,y) in enumerate(dataloader, 0):
+        for i, (x,y) in enumerate(train_ds, 0):
             ############################
             # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
             ###########################
@@ -294,6 +294,10 @@ def train_loop_conditional(opt, netG, netD, optimizerG, optimizerD, criterion, f
             global_step += 1
 
             if i == 0: #len(dataloader) - 1:
+                lsd, rmse, crps = test_loop_conditional(netG)
+                writer.add_scalar("Log spectral distance", lsd, global_step)
+                writer.add_scalar("Root mean square error", rmse, global_step)
+                writer.add_scalar("Continuous rank probability score", crps, global_step)
                 plot_images(real_cpu.cpu().numpy(), f"{opt.outf}/real_samples_epoch_{epoch}.png")
                 if opt.highres:
                     plot_images(pred_double.cpu().numpy(), f"{opt.outf}/pred_samples_epoch_{epoch}.png")
@@ -461,3 +465,50 @@ elif opt.model == 'vae':
     optimizer = optim.Adam(model.parameters(), lr=opt.lr)
     criterion = torch.nn.MSELoss(reduction='sum')
     train_loop_vae(opt, model, optimizer, criterion)
+
+def test_loop_conditional(netG):
+    crps = 0
+    lsd = 0
+    rmse = 0
+    step = 0
+    for i, (x, y) in enumerate(valid_ds, 0):
+        step += 1
+        data = y
+        real = data.to(device)
+        pred = x.to(device)
+        real = real.float()
+        pred = pred.float()
+        batch_size = real.size(0)
+
+        noise = torch.randn(batch_size, nz, device=device)
+        fake = netG(pred, noise)
+
+        real = real.detach().cpu().numpy()
+        fake = fake.detach().cpu().numpy()
+        lsd += log_spectral_distance_pairs_avg(real, fake)
+        rmse += rmse(real, fake)
+        ensemble = generate_ensemble(netG, pred, 10)
+        ensemble = ensemble.detach().cpu().numpy()
+        crps += crps_ensemble(real, ensemble)
+
+    lsd, rmse, crps = lsd / step, rmse / step, crps / step
+    return lsd, rmse, crps
+
+
+def generate_ensemble(netG, pred, no_members):
+    batch_size = pred.size(0)
+    noise = torch.randn(batch_size, nz, device=device)
+    fake = netG(pred, noise)
+    fake = torch.unsqueeze(fake, 2)
+
+    for i in range(no_members - 1):
+        noise = torch.randn(batch_size, nz, device=device)
+        new_fake = netG(pred, noise)
+        new_fake = torch.unsqueeze(new_fake, 2)
+        fake = torch.cat([fake, new_fake], 2)
+
+    return fake
+
+
+
+
