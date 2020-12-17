@@ -68,3 +68,81 @@ class ConvGenerator(nn.Module):
         embed_in = embedding.view(embedding.size(0),1,input.size(1)//3, input.size(2)//3)
         output = self.upsample(embed_in, output_size=input.size()[1:])
         return output.contiguous()
+
+
+class CondGeneratorHighres(nn.Module):
+    def __init__(self, ngpu, nz, ngf, ndf):
+        super(CondGeneratorHighres, self).__init__()
+        self.ngpu = ngpu
+        self.encoder = nn.Sequential(
+            # input is (nc) x 128 x 128
+            nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf) x 64 x 64
+            nn.Conv2d(ndf, ndf, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf) x 32 x 32
+            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(ndf*2, 1, 1, bias=False),
+            #add flatten layer
+            nn.Flatten()
+            #nn.BatchNorm2d(ndf * 2),
+            #nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*2) x 16 x 16
+            #nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
+            #nn.BatchNorm2d(ndf * 4),
+            #nn.LeakyReLU(0.2, inplace=True),
+            ## state size. (ndf*4) x 8 x 8
+            #nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
+            #nn.BatchNorm2d(ndf * 8),
+            #nn.LeakyReLU(0.2, inplace=True),
+            ## state size. (ndf*8) x 4 x 4
+            #nn.Conv2d(ndf * 8, 1, (4,6), 1, 0, bias=False),
+            #nn.LeakyReLU(0.2, inplace=True)
+        )
+
+        self.decoder = nn.Sequential(
+            # input is Z, going into a convolution
+            nn.ConvTranspose2d(384+nz, ngf * 32, (4,6), 1, 0, bias=False),
+            nn.BatchNorm2d(ngf * 32),
+            nn.ReLU(True),
+            # state size. (ngf*16) x 4 x 6
+            nn.ConvTranspose2d(ngf * 32, ngf * 16, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 16),
+            nn.ReLU(True),
+            # state size. (ngf*8) x 8 x 12
+            nn.ConvTranspose2d(ngf * 16, ngf * 8, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 8),
+            nn.ReLU(True),
+            # state size. (ngf*4) x 16 x 24
+            nn.ConvTranspose2d(ngf * 8,     ngf*4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf*4),
+            nn.ReLU(True),
+            # state size. (ngf*2) x 32 x 48
+            nn.ConvTranspose2d(ngf * 4,     ngf*2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf*2),
+            nn.ReLU(True),
+            # state size. (ngf) x 64 x 96
+            nn.ConvTranspose2d(ngf * 2,     ngf, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf),
+            nn.ReLU(True),
+            # state size. (ngf) x 64 x 96
+            nn.ConvTranspose2d(    ngf,      nc, 4, 2, 1, bias=False),
+            nn.Tanh()
+            # state size. (nc) x 128 x 192
+        )
+
+    def forward(self, input, noise):
+        if input.is_cuda and self.ngpu > 1:
+            encoded = nn.parallel.data_parallel(self.encoder, input, range(self.ngpu))
+            encoded = encoded.view(encoded.size(0),encoded.size(1),1,1)
+            noisy_encoded = torch.cat((encoded,noise),1)
+            output = nn.parallel.data_parallel(self.decoded, noisy_encoded, range(self.ngpu))
+        else:
+            encoded = self.encoder(input)
+            encoded = encoded.view(encoded.size(0), encoded.size(1),1,1)
+            noisy_encoded = torch.cat((encoded, noise),1)
+            output = self.decoder(noisy_encoded)
+        return output
+
