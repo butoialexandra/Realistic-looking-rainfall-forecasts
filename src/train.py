@@ -24,7 +24,6 @@ import socket
 from discriminator import *
 from generator import *
 from utils import *
-from verification import *
 
 
 datetimestr = datetime.now().strftime("%d-%b-%Y-%H:%M")
@@ -54,6 +53,8 @@ parser.add_argument('--outf', default=output_dir, help='folder to output images 
 parser.add_argument('--manual-seed', type=int, help='manual seed')
 parser.add_argument('--conditional', default=False, action='store_true', help='flag to indicate if using cluster')
 parser.add_argument('--highres', default=False, action='store_true', help='flag to indicate if using cluster')
+parser.add_argument('--add-l1', default=False, action='store_true', help='whether to use l1 loss in addition to discriminator loss, as in pix2pix')
+parser.add_argument('--add-skip-connections', default=False, action='store_true', help='whether to use skip connections in GAN, as in pix2pix')
 opt = parser.parse_args()
 print(opt)
 
@@ -93,14 +94,15 @@ elif opt.dataset == 'cond-cosmo':
 else:
     raise Exception("Invalid dataset %s" % opt.dataset)
 
-if opt.conditional:
+
+if opt.model in ['vae', 'cgan']:
     test_len = int(len(dataset) / 10)
     train_len = len(dataset) - test_len
     train_ds, valid_ds = torch.utils.data.random_split(dataset, lengths=[train_len, test_len], generator=torch.Generator().manual_seed(42))
-    train_ds = torch.utils.data.DataLoader(train_ds, batch_size=opt.batchSize, shuffle=False, num_workers=int(opt.workers))
+    train_ds = torch.utils.data.DataLoader(train_ds, batch_size=opt.batchSize, shuffle=True, num_workers=int(opt.workers))
     valid_ds = torch.utils.data.DataLoader(valid_ds, batch_size=opt.batchSize, shuffle=False, num_workers=int(opt.workers))
 else:
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize, shuffle=False, num_workers=int(opt.workers))
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize, shuffle=True, num_workers=int(opt.workers))
 
 
 print("Finished Dataloader", time.time()-main_time)
@@ -203,6 +205,8 @@ class VAE(torch.nn.Module):
 
 def train_loop_conditional(opt, netG, netD, optimizerG, optimizerD, criterion, fixed_noise):
     global_step = 0
+    if opt.add_l1:
+        l1_loss = torch.nn.L1Loss(reduction='mean')
 
     for epoch in range(opt.epochs):
         for i, (x,y) in enumerate(train_ds, 0):
@@ -212,27 +216,12 @@ def train_loop_conditional(opt, netG, netD, optimizerG, optimizerD, criterion, f
             # train with real
             data = y
             netD.zero_grad()
-            real_cpu = data.to(device)
-            pred = x.to(device)
-            real_cpu = real_cpu.float()
-            pred = pred.float()
+            real_cpu = data.to(device).float()
+            pred = x.to(device).float()
             batch_size = real_cpu.size(0)
-            # label = torch.full((batch_size,), real_label,
-                            #    dtype=real_cpu.dtype, device=device)
-            # if opt.highres:
-            #     pred_double = torch.repeat_interleave(pred, 2, dim=2)
-            #     pred_double = torch.repeat_interleave(pred_double, 2, dim=3)
-            #     ip_disc = torch.cat((real_cpu, pred_double), 1)
-            #     ip_disc = ip_disc.float()
-            # else:
-            #     ip_disc = torch.cat((real_cpu, pred), 1)
-            #     ip_disc = ip_disc.float()
             
             pred_double = upscale_input(pred)
-            # pred_double = torch.repeat_interleave(pred, 2, dim=2)
-            # pred_double = torch.repeat_interleave(pred_double, 2, dim=3)
             ip_disc = torch.cat((real_cpu, pred_double), 1)
-            print(ip_disc.dtype)
             ip_disc = ip_disc.float()
 
             output = netD(ip_disc)
@@ -242,19 +231,11 @@ def train_loop_conditional(opt, netG, netD, optimizerG, optimizerD, criterion, f
 
             # train with fake
             noise = torch.randn(batch_size, nz, device=device)
-            fake = netG(pred,noise)
-            # label.fill_(fake_label)
+            fake = netG(pred, noise)
             fake_nograd = fake.detach()
-            # if opt.highres:
-            #     ip_disc_fake = torch.cat((fake_nograd, pred_double), 1)
-            #     ip_disc_fake = ip_disc_fake.float()
-            # else:
-            #     ip_disc_fake = torch.cat((fake_nograd, pred), 1)
-            #     ip_disc_fake = ip_disc_fake.float()
             
             # TODO
-            ip_disc_fake = torch.cat((fake_nograd, pred_double), 1)
-            ip_disc_fake = ip_disc_fake.float()
+            ip_disc_fake = torch.cat((fake_nograd, pred_double), 1).float()
 
             output = netD(ip_disc_fake)
             errD_fake = criterion(output, torch.zeros((batch_size,), dtype=real_cpu.dtype, device=device))
@@ -267,50 +248,45 @@ def train_loop_conditional(opt, netG, netD, optimizerG, optimizerD, criterion, f
             # (2) Update G network: maximize log(D(G(z)))
             ###########################
             netG.zero_grad()
-            # label.fill_(real_label)  # fake labels are real for generator cost
-            # if opt.highres:
-            #     #pred_double = torch.repeat_interleave(pred, 2, dim=2)
-            #     #pred_double = torch.repeat_interleave(pred_double, 2, dim=3)
-            #     ip_gen = torch.cat((fake, pred_double), 1)
-            #     ip_gen = ip_gen.float()
-            # else:
-            #     ip_gen = torch.stack((fake, pred), dim=1)
-            #     ip_gen = ip_gen.float()
 
-            ip_gen = torch.cat((fake, pred_double), 1)
-            ip_gen = ip_gen.float()
+            ip_gen = torch.cat((fake, pred_double), 1).float()
 
             output = netD(ip_gen)
             errG = criterion(output, torch.ones((batch_size,), dtype=real_cpu.dtype, device=device))
+            if opt.add_l1:
+                errG += l1_loss(fake, real_cpu) * 100  # lambda=100 as in pix2pix paper
             errG.backward()
             D_G_z2 = output.mean().item()
             optimizerG.step()
 
             print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f D(x): %.4f D(G(z)): %.4f / %.4f'
-                  % (epoch, opt.epochs, i, len(dataloader),
+                  % (epoch, opt.epochs, i, len(train_ds),
                      errD.item(), errG.item(), D_x, D_G_z1, D_G_z2))
             writer.add_scalar("Generator loss", errG.item(), global_step)
             writer.add_scalar("Discriminator loss", errD.item(), global_step)
             global_step += 1
 
             if i == 0: #len(dataloader) - 1:
-                lsd, rmse, crps = test_loop_conditional(netG)
-                writer.add_scalar("Log spectral distance", lsd, global_step)
-                writer.add_scalar("Root mean square error", rmse, global_step)
-                writer.add_scalar("Continuous rank probability score", crps, global_step)
-                plot_images(real_cpu.cpu().numpy(), f"{opt.outf}/real_samples_epoch_{epoch}.png")
-                if opt.highres:
-                    plot_images(pred_double.cpu().numpy(), f"{opt.outf}/pred_samples_epoch_{epoch}.png")
-                else:
-                    plot_images(pred.cpu().numpy(), f"{opt.outf}/pred_samples_epoch_{epoch}.png")
-                fake = netG(pred, noise)
-                plot_images(fake.detach().cpu().numpy(), f"{opt.outf}/fake_samples_epoch_{epoch}.png")
+                x, y = next(iter(valid_ds))
+                x = x.to(device).float()
+                y = y.to(device).float()
+                y_ = netG(x, noise)
+                # plot_images(real_cpu.cpu().numpy(), f"{opt.outf}/real_samples_epoch_{epoch}.png")
+                # if opt.highres:
+                    # plot_images(pred_double.cpu().numpy(), f"{opt.outf}/pred_samples_epoch_{epoch}.png")
+                # else:
+                    # plot_images(pred.cpu().numpy(), f"{opt.outf}/pred_samples_epoch_{epoch}.png")
+                # plot_images(fake.detach().cpu().numpy(), f"{opt.outf}/fake_samples_epoch_{epoch}.png")
                 plot_image_single_conditional(fake[0][0].detach().cpu().numpy(), real_cpu[0][0].cpu().numpy(), f"{opt.outf}/image_pair_{epoch}.png")
+                plot_images_ncols(
+                    x.cpu().squeeze(1), y.cpu().squeeze(1), y_.detach().cpu().squeeze(1), 
+                    path=f"{opt.outf}/generated_{epoch}.png")
             if opt.dry_run:
                 break
         # do checkpointing
-        torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (opt.outf, epoch))
-        torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (opt.outf, epoch))
+        if epoch % 10 == 0 or epoch == opt.epochs - 1:
+            torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (opt.outf, epoch))
+            torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (opt.outf, epoch))
         writer.flush()
     writer.close()
 
@@ -375,8 +351,9 @@ def train_loop_unconditional(opt, netG, netD, optimizerG, optimizerD, criterion,
             if opt.dry_run:
                 break
         # do checkpointing
-        torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (opt.outf, epoch))
-        torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (opt.outf, epoch))
+        if epoch % 10 == 0 or epoch == opt.epochs - 1:
+            torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (opt.outf, epoch))
+            torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (opt.outf, epoch))
         writer.flush()
     writer.close()
 
@@ -429,14 +406,15 @@ if opt.model in ['gan', 'cgan']:
     if opt.model == 'gan':
         netG = GeneratorHighres(ngpu, nz).to(device)
     else:
-        netG = CondGeneratorHighres(ngpu, nz, n_filters=64).to(device)
+        netG = CondGeneratorHighres(ngpu, nz, n_filters=64, skip_connections=opt.add_skip_connections).to(device)
     netG.apply(weights_init)
     if opt.netG != '':
         netG.load_state_dict(torch.load(opt.netG))
     print(netG)
     print("Finished setting generators",time.time()-main_time)
 
-    netD = DiscriminatorHighres(ngpu, n_channels=1 if opt.model == 'gan' else 2).to(device)
+    channels = 1 if opt.model == 'gan' else 2
+    netD = DiscriminatorHighres(ngpu, n_channels=channels).to(device)
     netD.apply(weights_init)
     if opt.netD != '':
         netD.load_state_dict(torch.load(opt.netD))
@@ -465,50 +443,3 @@ elif opt.model == 'vae':
     optimizer = optim.Adam(model.parameters(), lr=opt.lr)
     criterion = torch.nn.MSELoss(reduction='sum')
     train_loop_vae(opt, model, optimizer, criterion)
-
-def test_loop_conditional(netG):
-    crps = 0
-    lsd = 0
-    rmse = 0
-    step = 0
-    for i, (x, y) in enumerate(valid_ds, 0):
-        step += 1
-        data = y
-        real = data.to(device)
-        pred = x.to(device)
-        real = real.float()
-        pred = pred.float()
-        batch_size = real.size(0)
-
-        noise = torch.randn(batch_size, nz, device=device)
-        fake = netG(pred, noise)
-
-        real = real.detach().cpu().numpy()
-        fake = fake.detach().cpu().numpy()
-        lsd += log_spectral_distance_pairs_avg(real, fake)
-        rmse += rmse(real, fake)
-        ensemble = generate_ensemble(netG, pred, 10)
-        ensemble = ensemble.detach().cpu().numpy()
-        crps += crps_ensemble(real, ensemble)
-
-    lsd, rmse, crps = lsd / step, rmse / step, crps / step
-    return lsd, rmse, crps
-
-
-def generate_ensemble(netG, pred, no_members):
-    batch_size = pred.size(0)
-    noise = torch.randn(batch_size, nz, device=device)
-    fake = netG(pred, noise)
-    fake = torch.unsqueeze(fake, 2)
-
-    for i in range(no_members - 1):
-        noise = torch.randn(batch_size, nz, device=device)
-        new_fake = netG(pred, noise)
-        new_fake = torch.unsqueeze(new_fake, 2)
-        fake = torch.cat([fake, new_fake], 2)
-
-    return fake
-
-
-
-
