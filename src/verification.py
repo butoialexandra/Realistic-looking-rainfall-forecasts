@@ -110,3 +110,10 @@ def rmse(generated, real):
     """
     return np.sqrt(((generated-real)**2).mean())
 
+
+def crps(ensemble, obs):
+    crps = verification.probscores.CRPS_init()
+    verification.probscores.CRPS_accum(crps, ensemble,
+                                       obs)
+    return verification.probscores.CRPS_compute(crps)
+
