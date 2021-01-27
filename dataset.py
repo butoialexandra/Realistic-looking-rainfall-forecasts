@@ -73,7 +73,7 @@ def load_predictions_from_cache(load_dir, verbose=True):
     predictions = np.concatenate(predictions,axis=0) 
     return predictions
 
-def load_x_y_from_cache(load_dir, test=False,verbose=True):
+def load_x_y_from_cache(load_dir, test=True,verbose=True):
     predictions = []
     observations = []
     observations_hr = []
@@ -189,7 +189,7 @@ class UnconditionalDataset(torch.utils.data.Dataset):
 
 
 class ConditionalDataset(torch.utils.data.Dataset):
-    def __init__(self, device='cpu', img_size =64, highres= True, test=False):
+    def __init__(self, device='cpu', img_size =64, highres= True, test=True):
         load_dir = "/mnt/ds3lab-scratch/dslab2019/shghosh/preprocessed"
         if test:
             dataset_len = 2050

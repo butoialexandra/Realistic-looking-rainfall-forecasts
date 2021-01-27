@@ -32,7 +32,7 @@ parser.add_argument('--dataroot', required=False, help='path to dataset')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=0)
 parser.add_argument('--batchSize', type=int, default=64, help='input batch size')
 parser.add_argument('--imageSize', type=int, default=64, help='the height / width of the input image to network')
-parser.add_argument('--nz', type=int, default=100, help='size of the latent z vector')
+parser.add_argument('--nz', type=int, default=92, help='size of the latent z vector')
 parser.add_argument('--ngf', type=int, default=64)
 parser.add_argument('--ndf', type=int, default=64)
 parser.add_argument('--niter', type=int, default=200, help='number of epochs to train for')
@@ -131,6 +131,8 @@ if opt.conditional:
     num_data = len(dataset)
     train_idx = range(math.floor((1.0 - opt.test_fraction)*num_data))
     test_idx = range(math.ceil((1.0 - opt.test_fraction)*num_data), num_data)
+    train_dataset = dataset[train_idx]
+    test_dataset = dataset[test_idx]
     dataloader = torch.utils.data.DataLoader(train_dataset, batch_size = opt.batchSize,
                                                    shuffle=True, num_workers=int(opt.workers))
     test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size = opt.batchSize,
@@ -186,7 +188,32 @@ def weights_init(m):
     elif classname.find('BatchNorm') != -1:
         torch.nn.init.normal_(m.weight, 1.0, 0.02)
         torch.nn.init.zeros_(m.bias)
+class Flatten(torch.nn.Module):
+    def forward(self, x):
+        return x.view(x.size(0), -1)
 
+
+class ListModule(torch.nn.Module):
+    def __init__(self, *args):
+        super(ListModule, self).__init__()
+        idx = 0
+        for module in args:
+            self.add_module(str(idx), module)
+            idx += 1
+
+    def __getitem__(self, idx):
+        if idx < 0 or idx >= len(self._modules):
+            raise IndexError('index {} is out of range'.format(idx))
+        it = iter(self._modules.values())
+        for i in range(idx):
+            next(it)
+        return next(it)
+
+    def __iter__(self):
+        return iter(self._modules.values())
+
+    def __len__(self):
+        return len(self._modules)
 
 class Generator(nn.Module):
     def __init__(self, ngpu):
@@ -482,9 +509,198 @@ class CondGeneratorHighresTile(nn.Module):
             noisy_encoded = torch.cat((encoded, noise),1)
             output = self.decoder(noisy_encoded)
         return output
+
+
+
+class CondGeneratorHighresBig(nn.Module):
+
+    def __init__(self, ngpu, n_filters=4, skip_connections=False):
+        super(CondGeneratorHighresBig, self).__init__()
+        self.ngpu = ngpu
+        #self.input_dim = input_dim
+        self.n_filters = n_filters
+        self.use_skip_connections = skip_connections    
+
+        self.encoder = ListModule(
+            nn.Sequential(
+                # input is (nc) x 128 x 192
+                nn.Conv2d(1, n_filters, 4, 2, 1, bias=False),
+                nn.BatchNorm2d(n_filters),
+                nn.LeakyReLU(0.2, inplace=True),
+            ),
+            nn.Sequential(
+                # n_filters x 64 x 96
+                nn.Conv2d(n_filters, n_filters, 4, 2, 1, bias=False),
+                nn.BatchNorm2d(n_filters),
+                nn.LeakyReLU(0.2, inplace=True),
+            ),
+            nn.Sequential(
+                # n_filters x 32 x 48
+                nn.Conv2d(n_filters, n_filters * 2, 4, 2, 1, bias=False),
+                nn.BatchNorm2d(n_filters * 2),
+                nn.LeakyReLU(0.2, inplace=True),
+            ),
+            nn.Sequential(
+                # n_filters x 16 x 24
+                nn.Conv2d(n_filters * 2, n_filters * 2, 4, 2, 1, bias=False),
+                nn.LeakyReLU(0.2, inplace=True),
+                # output: also 1 x 16 x 24 = 384
+            ),
+            nn.Sequential(
+                # n_filters x 8 x 12
+                nn.Conv2d(n_filters * 2, 1, 1, bias=False),
+                nn.LeakyReLU(0.2, inplace=True),
+                # output: also 1 x 8 x 12 = 96
+            )
+        )
+
+        decoder_filters = [
+            n_filters * 32,
+            n_filters * 16,
+            n_filters * 8,
+            n_filters * 4,
+            n_filters * 2,
+            n_filters,
+            1
+        ]
+        
+        decoder_input_channels = [
+            96,
+            n_filters * 32,
+            n_filters * 16,
+            n_filters * 8,
+            n_filters * 4,
+            n_filters * 2,
+            n_filters
+        ]
+
+        if self.use_skip_connections:
+            decoder_input_channels[2] += n_filters * 2
+            decoder_input_channels[3] += n_filters * 2
+            decoder_input_channels[4] += n_filters
+            decoder_input_channels[5] += n_filters
+            decoder_input_channels[6] += 1
+
+        decoder_layers = []
+        use_bias = True
+        # Generate N blocks of deconvolution-batchnorm-nonlinearity
+        for i, (in_channels, out_channels) in enumerate(zip(decoder_input_channels, decoder_filters)):
+            block_layers = []
+            if i == 0:
+                # first layer has different parameters
+                kernel_size = (4,6)
+                stride, padding = 1, 0
+            else:
+                kernel_size, stride, padding = 4, 2, 1
+            block_layers.append(nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride, padding, bias=use_bias))
+            if out_channels > 1:  # (i < len(decoder_filters) - 1):
+                block_layers.append(nn.BatchNorm2d(out_channels))
+                block_layers.append(nn.ReLU(inplace=True))
+            else:
+                # last layer can't have batchnorm, because it would output all zeros
+                block_layers.append(nn.Tanh())
+            decoder_layers.append(nn.Sequential(*block_layers))
+
+        self.decoder = ListModule(*decoder_layers)
+
+        #self.decoder_blocks = ListModule(
+        #    nn.Sequential(
+        #        # (384 = output of encoder) + (input_dim = 1,2)
+        #        nn.ConvTranspose2d(96, n_filters * 32, (4,6), 1, 0, bias=False),
+        #        nn.BatchNorm2d(n_filters * 32),
+        #        nn.ReLU(True),
+        #    ),
+        #    nn.Sequential(
+        #        # (n_filters*16) x 4 x 6
+        #        nn.ConvTranspose2d(n_filters * 32, n_filters * 16, 4, 2, 1, bias=False),
+        #        nn.BatchNorm2d(n_filters * 16),
+        #        nn.ReLU(True),
+        #    ),
+        #    nn.Sequential(
+        #        # (n_filters*8) x 8 x 12
+        #        nn.ConvTranspose2d(n_filters * 16 + n_filters * 2, n_filters * 8, 4, 2, 1, bias=False),
+        #        nn.BatchNorm2d(n_filters * 8),
+        #        nn.ReLU(True),
+        #    ),
+        #    nn.Sequential(
+        #        # (n_filters*4) x 16 x 24
+        #        nn.ConvTranspose2d(n_filters * 8 + n_filters * 2, n_filters*4, 4, 2, 1, bias=False),
+        #        nn.BatchNorm2d(n_filters * 4),
+        #        nn.ReLU(True),
+        #    ),
+        #    nn.Sequential(
+        #        # (n_filters*2) x 32 x 48
+        #        nn.ConvTranspose2d(n_filters * 4 + n_filters,n_filters * 2, 4, 2, 1, bias=False),
+        #        nn.BatchNorm2d(n_filters*2),
+        #        nn.ReLU(True),
+        #    ),
+        #    nn.Sequential(
+        #        # (n_filters) x 64 x 96
+        #        nn.ConvTranspose2d(n_filters * 2 + n_filters, n_filters, 4, 2, 1, bias=False),
+        #        nn.BatchNorm2d(n_filters),
+        #        nn.ReLU(True),
+        #    ),
+        #    nn.Sequential(
+        #        # (n_filters) x 128 x 192
+        #        nn.ConvTranspose2d(n_filters + 1, 1, 4, 2, 1, bias=False),
+        #        nn.Tanh()
+        #        # output: 1 x 256 x 384
+        #    )
+        #)
+
+    def forward(self, input, noise):
+        #noise = noise.unsqueeze(-1).unsqueeze(-1)
+
+        # if input.is_cuda and self.ngpu > 1:
+            # encoded = nn.parallel.data_parallel(self.encoder, input, range(self.ngpu))
+            # encoded = encoded.view(encoded.size(0),encoded.size(1),1,1)
+            # noisy_encoded = torch.cat((encoded,noise),1)
+            # output = nn.parallel.data_parallel(self.decoded, noisy_encoded, range(self.ngpu))
+        # else:
+            # encoded = self.encoder(input)
+            # encoded = encoded.view(encoded.size(0), encoded.size(1),1,1)
+            # noisy_encoded = torch.cat((encoded, noise),1)
+            # output = self.decoder(noisy_encoded)
+
+        # TODO(mzilinec): fix for multiple GPUs
+        
+        output = self._forward(input, noise)
+        return output
+
+    def _forward(self, cond_input, noise):
+        skip_conn_tgts = [2, 3, 4, 5, 6]
+        skip_conns = []
+        x = cond_input
+
+        for block in self.encoder:
+            # create skip connection to decoder
+            if self.use_skip_connections:
+                skip_conns.append(x)
+            # apply encoder block
+            x = block(x)
+
+        x = torch.flatten(x, start_dim=1)
+        x = x.view(x.size(0), x.size(1), 1, 1)
+        x = torch.cat((x, noise), dim=1)  # TODO(mzilinec): i DISABLED noise (see pix2pix)
+        # TODO(mzilinec): the 2nd /noise/ dim likely gets ignored, we should *add* them instead
+
+        for i, block in enumerate(self.decoder):
+            # apply skip connection from encoder
+            if self.use_skip_connections and i == skip_conn_tgts[0]:
+                skip_conn_tgts = skip_conn_tgts[1:]
+                skip_conn = skip_conns.pop()
+                x = torch.cat((x, skip_conn), dim=1)
+                # print(x.size())
+            # apply decoder block
+            x = block(x)
+        
+        return x
+
+
+
 #add condition for highres
 if opt.conditional and opt.highres:
-    netG = CondGeneratorHighresTile(ngpu).to(device)
+    netG = CondGeneratorHighresBig(ngpu).to(device)
 elif opt.conditional and not opt.highres:
     netG = CondGenerator(ngpu).to(device)
 elif opt.highres:
@@ -706,6 +922,7 @@ if opt.conditional:
 
             # train with fake
             noise = torch.randn(batch_size, nz, 1, 1, device=device)
+            print(f"Pred shape: {pred.shape}, Noise shape: {noise.shape}")
             fake = netG(pred,noise)
             label.fill_(fake_label)
             fake_nograd = fake.detach()
