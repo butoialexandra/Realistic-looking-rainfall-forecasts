@@ -10,6 +10,7 @@ import torch.backends.cudnn as cudnn
 import torch.optim as optim
 import torch.utils.data
 import torch.nn.functional as F
+import torchvision
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -38,6 +39,8 @@ if __name__ == "__main__":
     rmse = 0
     w_ratio = 0
     step = 0
+
+    rescale = torchvision.transforms.Resize(size=[128,196])
     for i, (x, y) in enumerate(valid_ds, 0):
         step += 1
         data = y
@@ -45,7 +48,8 @@ if __name__ == "__main__":
         pred = x.to(device)
         real = real.float()
         pred = pred.float()
-        real = F.interpolate(real, scale_factor=0.5, mode="bilinear")
+
+        real = rescale(real)
         real = real.detach().cpu().numpy()
         pred = pred.detach().cpu().numpy()
         lsd += log_spectral_distance_pairs_avg(real, pred)
