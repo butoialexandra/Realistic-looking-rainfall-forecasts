@@ -365,6 +365,8 @@ if __name__ == "__main__":
         test_idx = range(math.ceil(0.75 * num_data), num_data)
         train_ds = torch.utils.data.Subset(dataset, train_idx)
         valid_ds = torch.utils.data.Subset(dataset, test_idx)
+        print("Train dataset length: {}".format(len(train_ds)))
+        print("Valid dataset length: {}".format(len(valid_ds)))
         train_dataloader = torch.utils.data.DataLoader(train_ds, batch_size=opt.batchSize, shuffle=True, num_workers=int(opt.workers))
         valid_dataloader = torch.utils.data.DataLoader(valid_ds, batch_size=opt.batchSize, shuffle=False,
                                                        num_workers=int(opt.workers))
