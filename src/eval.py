@@ -17,6 +17,7 @@ if __name__ == "__main__":
     parser.add_argument('--cuda', default=True, action='store_true', help='enables cuda')
     parser.add_argument('--device', type=int, default=0, help='selects cuda device')
     parser.add_argument('--batchSize', type=int, default=64, help='input batch size')
+    parser.add_argument('--workers', type=int, help='number of data loading workers', default=0)
     opt = parser.parse_args()
 
 
