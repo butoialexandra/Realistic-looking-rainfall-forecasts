@@ -100,7 +100,7 @@ def log_spectral_distance_pairs_avg(preds, obs):
         lsds[i] = log_spectral_distance(preds[i,:,:], obs[i,:,:])
     return np.nanmean(lsds)
 
-def rmse(generated, real):
+def root_mse(generated, real):
     """
     Computes root mean squared error between a batch of generated
     and a batch of real images
@@ -116,4 +116,7 @@ def crps(ensemble, obs):
     verification.probscores.CRPS_accum(crps, ensemble,
                                        obs)
     return verification.probscores.CRPS_compute(crps)
+
+def wetness_ratio(generated, real):
+    return (np.count_nonzero(generated) / np.count_nonzero(real))
 

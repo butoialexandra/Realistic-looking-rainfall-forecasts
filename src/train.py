@@ -25,6 +25,7 @@ import socket
 from discriminator import *
 from generator import *
 from utils import *
+from verification import *
 
 
 class VAE(torch.nn.Module):
@@ -273,6 +274,37 @@ def train_loop_conditional(opt, netG, netD, optimizerG, optimizerD, criterion, f
                 plot_images_ncols(
                     x.cpu().squeeze(1), y.cpu().squeeze(1), y_.detach().cpu().squeeze(1),
                     path=f"{opt.outf}/generated_{epoch}.png")
+                ###############
+                ### Validation
+                ###############
+                lsd = 0
+                rmse = 0
+                w_ratio = 0
+                step = 0
+                for i, (x, y) in enumerate(valid_ds, 0):
+                    step += 1
+                    data = y
+                    real = data.to(device)
+                    pred = x.to(device)
+                    real = real.float()
+                    pred = pred.float()
+                    batch_size = real.size(0)
+
+                    noise = torch.randn(batch_size, nz, device=device)
+                    fake = netG(pred, noise)
+
+                    real = real.detach().cpu().numpy()
+                    fake = fake.detach().cpu().numpy()
+                    lsd += log_spectral_distance_pairs_avg(real, fake)
+                    rmse += root_mse(fake, real)
+                    w_ratio += wetness_ratio(fake, real)
+
+                lsd, rmse, w_ratio = lsd / step, rmse / step, w_ratio / step
+
+                writer.add_scalar("Log spectral distance", lsd, global_step)
+                writer.add_scalar("Root mean squared error", rmse, global_step)
+                writer.add_scalar("Wetness ratio", w_ratio, global_step)
+
             if opt.dry_run:
                 break
         # do checkpointing
@@ -361,8 +393,8 @@ if __name__ == "__main__":
         # train_ds = torch.utils.data.DataLoader(train_ds, batch_size=opt.batchSize, shuffle=True, num_workers=int(opt.workers))
         # valid_ds = torch.utils.data.DataLoader(valid_ds, batch_size=opt.batchSize, shuffle=False, num_workers=int(opt.workers))
         num_data = len(dataset)
-        train_idx = range(math.floor(0.75 * num_data))
-        test_idx = range(math.ceil(0.75 * num_data), num_data)
+        train_idx = range(math.floor(0.9 * num_data))
+        test_idx = range(math.ceil(0.9 * num_data), num_data)
         train_ds = torch.utils.data.Subset(dataset, train_idx)
         valid_ds = torch.utils.data.Subset(dataset, test_idx)
         print("Train dataset length: {}".format(len(train_ds)))
