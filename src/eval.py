@@ -45,7 +45,7 @@ if __name__ == "__main__":
         pred = x.to(device)
         real = real.float()
         pred = pred.float()
-        real = F.interpolate(real, size=(128, 192))
+        real = F.interpolate(real, scale_factor=0.5, mode="bilinear")
         real = real.detach().cpu().numpy()
         pred = pred.detach().cpu().numpy()
         lsd += log_spectral_distance_pairs_avg(real, pred)
