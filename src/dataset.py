@@ -19,6 +19,8 @@ import pyproj
 
 from sklearn.model_selection import train_test_split
 
+base_dir = "/mnt/ds3lab-scratch/bhendj/data"
+
 def load_observations(base_dir, on_cluster=False, verbose=True):
     """
     Observations: data for every hour
@@ -37,7 +39,7 @@ def load_observations(base_dir, on_cluster=False, verbose=True):
             files[f"{dt.year}{dt.month:02d}"] = obj
             dt = dt + relativedelta(months=1)
     else:
-        path = "./combiprecip_201805.nc"
+        path = "../combiprecip_201805.nc"
         weather = xr.open_mfdataset(path, combine='by_coords')
         files['201805'] = weather
     return files
@@ -51,7 +53,7 @@ def load_predictions(base_dir, on_cluster=False):
     if on_cluster:
         path = join(base_dir, "cosmoe", "data.zarr", "data_ethz.zarr")
     else:
-        path = "./cosmoe_prec_201805.zarr"
+        path = "../cosmoe_prec_201805.zarr"
 
     cosmo = xr.open_zarr(path)
 
@@ -63,6 +65,43 @@ def load_predictions(base_dir, on_cluster=False):
     dst_x, dst_y = pyproj.transform(src_proj, dst_proj, src_x, src_y, always_xy=True)
     cosmo = cosmo.assign_coords({"chx": (("y", "x"), dst_x) , "chy": (("y", "x"), dst_y)})
     return cosmo
+
+
+class TrainingDatasetCond(torch.utils.data.Dataset):
+    def __init__(self, on_cluster=False):
+        self.observations = load_observations(on_cluster)
+        self.cosmo = load_predictions(on_cluster)
+        self.compute_nearest_neighbors()
+        self.ids = []
+
+
+    def __len__(self):
+        return len(self.predictions)
+
+    def standardize_images(self, image_set):
+        image_set = image_set / 10.0  # TODO: sqrt?
+        image_set = torch.clip(image_set, 0.0, 1.0)
+        image_set = torch.unsqueeze(image_set, dim=1)
+        return image_set
+
+    def compute_nearest_neighbors(self):
+
+        chx, chy = self.cosmo['chx'], self.cosmo['chy']
+        curr_x, curr_y = chx.x.values, chx.y.values
+        ext_x, ext_y = np.random.rand(2 * len(curr_x) - 1), np.random.rand(2 * len(curr_y) - 1)
+        mid_x, mid_y = (curr_x[1:] + curr_x[:-1]) / 2.0, (curr_y[1:] + curr_y[:-1]) / 2.0
+        ext_x[::2], ext_y[::2] = curr_x, curr_y
+        ext_x[1::2], ext_y[1::2] = mid_x, mid_y
+        chx_ext = chx.interp(x=ext_x, y=ext_y)
+        chy_ext = chy.interp(x=ext_x, y=ext_y)
+        self.observations = self.observations.sel(chx=chx_ext, chy=chy_ext, method='nearest')
+
+
+    def __getitem__(self, index):
+        if self.highres:
+            return self.predictions[index], self.observations_highres[index]
+        else:
+            return self.predictions[index], self.observations[index]
 
 def load_predictions_from_cache(load_dir, verbose=True):
     predictions = []
@@ -199,89 +238,6 @@ class UnconditionalDataset(torch.utils.data.Dataset):
         return img
 
 
-class ConditionalDataset(torch.utils.data.Dataset):
-    def __init__(self, device='cpu', highres= True, test=False):
-        load_dir = "/mnt/ds3lab-scratch/dslab2019/shghosh/preprocessed"
-        if test:
-            dataset_len = 2050
-        else:
-            dataset_len =  36472
-        #self.predictions = (np.zeros((dataset_len, 128, 192))+0.1).astype(float)
-        #self.observations = (np.zeros((dataset_len, 128, 192))+0.1).astype(float)
-        # self.observations_highres = (np.zeros((dataset_len, 256, 384))+0.1).astype(float)
-
-        self.predictions = torch.zeros([dataset_len, 128, 192], dtype=torch.float)
-        self.observations = torch.zeros([dataset_len, 128, 192], dtype=torch.float)
-        self.observations_highres = torch.zeros([dataset_len, 256, 384], dtype=torch.float)
-
-        self.predictions[:, :-1, :-4], self.observations[:,:-1,:-4], self.observations_highres[:,:-3, :-9] = load_x_y_from_cache(load_dir)
-
-        #self.predictions = self.predictions[:len(self.observations)] #Can remove once all the data is cached
-        #rand_mat = (np.random.rand(self.predictions.shape[0],1,self.predictions.shape[2])+0.1).astype(float)
-        #self.predictions = np.concatenate((self.predictions, rand_mat), axis=1)
-        #rand_mat = (np.random.rand(self.predictions.shape[0],self.predictions.shape[1],4)+0.1).astype(float)
-        #self.predictions = np.concatenate((self.predictions, rand_mat), axis=2)
-        #rand_mat = (np.random.rand(self.observations.shape[0],1,self.observations.shape[2])+0.1).astype(float)
-        #self.observations = np.concatenate((self.observations, rand_mat), axis=1)
-        #rand_mat = (np.random.rand(self.observations.shape[0],self.observations.shape[1],4)+0.1).astype(float)
-        #self.observations = np.concatenate((self.observations, rand_mat), axis=2)
-        #rand_mat = (np.random.rand(self.observations_highres.shape[0],3,self.observations_highres.shape[2])+0.1).astype(float)
-        #self.observations_highres = np.concatenate((self.observations_highres, rand_mat), axis=1)
-        #rand_mat = (np.random.rand(self.observations_highres.shape[0],self.observations_highres.shape[1],9)+0.1).astype(float)
-        #self.observations_highres = np.concatenate((self.observations_highres, rand_mat), axis=2)
-        # Standardizing images
-        self.predictions = self.standardize_images(self.predictions)
-        self.observations = self.standardize_images(self.observations)
-        self.observations_highres = self.standardize_images(self.observations_highres)
-
-        median_val = torch.mean(self.observations.sum(dim=(1,2,3))) * 2.0
-        idx_retain = self.observations.sum(dim=(1,2,3)) > median_val
-        self.predictions = self.predictions[idx_retain]
-        self.observations = self.observations[idx_retain]
-        self.observations_highres = self.observations_highres[idx_retain]
-
-        # median_val = np.mean(self.observations.sum(axis=(1,2,3)))*2.0
-        # idx_retain = self.observations.sum(axis=(1,2,3)) > median_val
-        # self.predictions = self.predictions[idx_retain]
-        # self.observations = self.observations[idx_retain]
-        # self.observations_highres = self.observations_highres[idx_retain]
-        self.highres = highres
-
-
-        ## Are we changing the data by standardizing, should we revert before plotting
-
-    def __len__(self):
-        return len(self.predictions)
-
-    def standardize_images(self, image_set):
-        image_set = image_set / 10.0  # TODO: sqrt?
-        image_set = torch.clip(image_set, 0.0, 1.0)
-        image_set = torch.unsqueeze(image_set, dim=1)
-        return image_set
-
-    def get_tiles(self, image_set):
-        offset = int(self.image_size/2)
-        def read_y_rows():
-            return array[offset:rows + offset]
-
-
-        def read_x_cols(array, cols, offset):
-            return list(row[offset:cols + offset] for row in array)
-
-
-            result = []
-            for start_row in range(len(array) - y_dim_rows + 1):
-                y_rows = read_y_rows(array, y_dim_rows, start_row)
-                for start_col in range(len(max(array, key=len)) - x_dim_cols + 1):
-                    x_columns = read_x_cols(y_rows, x_dim_cols, start_col)
-                    result.append(x_columns)
-        return result
-
-    def __getitem__(self, index):
-        if self.highres:
-            return self.predictions[index], self.observations_highres[index]
-        else:
-            return self.predictions[index], self.observations[index]
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, device='cpu', on_cluster=False):
@@ -441,15 +397,86 @@ def create_training_dataset(out_dir="/mnt/ds3lab-scratch/dslab2019/shghosh/prepr
         save_buffer_to_file(buffer_y, join(out_dir, f"y.{file_offset}.pt"))
         save_buffer_to_file(buffer_y_highres, join(out_dir, f"yHighres.{file_offset}.pt"))
 
+class ConditionalDataset(torch.utils.data.Dataset):
+    def __init__(self, device='cpu', highres= True, test=False):
+        load_dir = "/mnt/ds3lab-scratch/dslab2019/shghosh/preprocessed"
+        if test:
+            dataset_len = 2050
+        else:
+            dataset_len =  36472
+        #self.predictions = (np.zeros((dataset_len, 128, 192))+0.1).astype(float)
+        #self.observations = (np.zeros((dataset_len, 128, 192))+0.1).astype(float)
+        # self.observations_highres = (np.zeros((dataset_len, 256, 384))+0.1).astype(float)
+
+        self.predictions = torch.zeros([dataset_len, 128, 192], dtype=torch.float)
+        self.observations = torch.zeros([dataset_len, 128, 192], dtype=torch.float)
+        self.observations_highres = torch.zeros([dataset_len, 256, 384], dtype=torch.float)
+
+        self.predictions[:, :-1, :-4], self.observations[:,:-1,:-4], self.observations_highres[:,:-3, :-9] = load_x_y_from_cache(load_dir)
+        # Standardizing images
+        self.predictions = self.standardize_images(self.predictions)
+        self.observations = self.standardize_images(self.observations)
+        self.observations_highres = self.standardize_images(self.observations_highres)
+
+        median_val = torch.mean(self.observations.sum(dim=(1,2,3))) * 2.0
+        idx_retain = self.observations.sum(dim=(1,2,3)) > median_val
+        self.predictions = self.predictions[idx_retain]
+        self.observations = self.observations[idx_retain]
+        self.observations_highres = self.observations_highres[idx_retain]
+
+        # median_val = np.mean(self.observations.sum(axis=(1,2,3)))*2.0
+        # idx_retain = self.observations.sum(axis=(1,2,3)) > median_val
+        # self.predictions = self.predictions[idx_retain]
+        # self.observations = self.observations[idx_retain]
+        # self.observations_highres = self.observations_highres[idx_retain]
+        self.highres = highres
+
+
+        ## Are we changing the data by standardizing, should we revert before plotting
+
+    def __len__(self):
+        return len(self.predictions)
+
+    def standardize_images(self, image_set):
+        image_set = image_set / 10.0  # TODO: sqrt?
+        image_set = torch.clip(image_set, 0.0, 1.0)
+        image_set = torch.unsqueeze(image_set, dim=1)
+        return image_set
+
+    def get_tiles(self, image_set):
+        offset = int(self.image_size/2)
+        def read_y_rows():
+            return array[offset:rows + offset]
+
+
+        def read_x_cols(array, cols, offset):
+            return list(row[offset:cols + offset] for row in array)
+
+
+            result = []
+            for start_row in range(len(array) - y_dim_rows + 1):
+                y_rows = read_y_rows(array, y_dim_rows, start_row)
+                for start_col in range(len(max(array, key=len)) - x_dim_cols + 1):
+                    x_columns = read_x_cols(y_rows, x_dim_cols, start_col)
+                    result.append(x_columns)
+        return result
+
+    def __getitem__(self, index):
+        if self.highres:
+            return self.predictions[index], self.observations_highres[index]
+        else:
+            return self.predictions[index], self.observations[index]
 
 if __name__ == "__main__":
-    from utils import plot_images_ncols
-    cachedir = "/mnt/ds3lab-scratch/dslab2019/shghosh/preprocessed"
-    preds, obs, obs_hr = load_x_y_from_cache(cachedir)
-    plot_images_ncols(preds[10000:10100], obs[10000:10100], obs_hr[10000:10100], path='test.png')
+    # from utils import plot_images_ncols
+    # cachedir = "/mnt/ds3lab-scratch/dslab2019/shghosh/preprocessed"
+    # preds, obs, obs_hr = load_x_y_from_cache(cachedir)
+    # plot_images_ncols(preds[10000:10100], obs[10000:10100], obs_hr[10000:10100], path='test.png')
 
     #create_training_dataset("/mnt/ds3lab-scratch/mzilinec/testds/")
     # d = Dataset()
     # prec_pred, prec_real = d.get_x_y_at_time(0)
     # plotit()
+
+    ds = TrainingDatasetCond()
 
