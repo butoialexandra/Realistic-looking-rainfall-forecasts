@@ -305,6 +305,10 @@ def train_loop_conditional(opt, netG, netD, optimizerG, optimizerD, criterion, f
                 writer.add_scalar("Root mean squared error", rmse, global_step)
                 writer.add_scalar("Wetness ratio", w_ratio, global_step)
 
+                print("Log spectral distance: {}".format(lsd))
+                print("Root mean squared error: {}".format(rmse))
+                print("Wetness ratio: {}".format(w_ratio))
+
             if opt.dry_run:
                 break
         # do checkpointing
